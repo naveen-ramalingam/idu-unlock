@@ -624,8 +624,18 @@ def _release(version: str) -> tuple | None:
     return tuple(int(part) for part in match.group(1).split(".")) if match else None
 
 
-def _supported_release(release: tuple) -> bool:
-    cutoff = (3, 2, 0)
+# Newest build confirmed to still run the changeUserPassword shell-out, by
+# family. On MTK (6j01) the fix had landed by R3.2.3 — read out of a stock
+# JIDU6701 rootfs — and a member-confirmed working build is R3.2.0. Qualcomm
+# (6j11) builds lag behind: a unit on R3.2.6 still took the injection (member
+# report). Anything newer than a family's cutoff reports TEST. The default
+# covers a device whose family is unknown, and stays where it always was.
+PASSWORD_CUTOFF = {"mediatek": (3, 2, 0), "qualcomm": (3, 2, 6)}
+DEFAULT_CUTOFF = (3, 2, 0)
+
+
+def _supported_release(release: tuple, family: str | None = None) -> bool:
+    cutoff = PASSWORD_CUTOFF.get(family, DEFAULT_CUTOFF)
     return (release[:len(cutoff)] < cutoff
             or (release[:len(cutoff)] == cutoff
                 and not any(release[len(cutoff):])))
@@ -634,12 +644,16 @@ def _supported_release(release: tuple) -> bool:
 def check(api: Api) -> Verdict:
     """Decide whether a unit can be unlocked — WITHOUT changing anything.
 
-    A read-only probe: the firmware release says whether the
-    changeUserPassword handler version is only a compatibility hint.
+    A read-only probe: the firmware release sets the expectation for the
+    changeUserPassword handler (cutoff differs by family — see
+    PASSWORD_CUTOFF), but the version is only a compatibility hint.
     """
     model = api.device.model if api.device else "?"
     version = firmware_version(api)
     release = _release(version)
+    family = api.device.family if api.device else None
+    cutoff = PASSWORD_CUTOFF.get(family, DEFAULT_CUTOFF)
+    label = f"R{'.'.join(str(part) for part in cutoff)}"
 
     evidence = [f"firmware {version or 'unknown'}"]
     vectors = []
@@ -648,13 +662,16 @@ def check(api: Api) -> Verdict:
         vectors.append(PasswordVector.name)
         evidence.append("unrecognised version string; test the API with unlock")
         test_required = True
-    elif _supported_release(release):
+    elif _supported_release(release, family):
         vectors.append(PasswordVector.name)
-        evidence.append("release <= R3.2.0: changeUserPassword is injectable")
+        evidence.append(
+            f"release <= {label} on {family or 'unknown'} boards: "
+            "changeUserPassword is injectable")
         test_required = False
     else:
         vectors.append(PasswordVector.name)
-        evidence.append("release > R3.2.0: test the API with unlock")
+        evidence.append(
+            f"release > {label} on {family or 'unknown'} boards: test the API with unlock")
         test_required = True
 
     return Verdict(model=model, firmware=version, vectors=vectors,

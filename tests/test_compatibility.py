@@ -6,8 +6,8 @@ import idu
 
 
 class FakeApi:
-    def __init__(self, version):
-        self.device = idu.Device("JIDU6101", "Arcadyan", "test", {})
+    def __init__(self, version, model="JIDU6101"):
+        self.device = idu.Device(model, "Arcadyan", "test", {})
         self.version = version
 
     def call(self, method, params=None):
@@ -139,8 +139,8 @@ class MfgLayoutTests(unittest.TestCase):
 
 
 class CompatibilityTests(unittest.TestCase):
-    def assert_release(self, version, test_required):
-        verdict = idu.check(FakeApi(version))
+    def assert_release(self, version, test_required, model="JIDU6101"):
+        verdict = idu.check(FakeApi(version, model))
         self.assertEqual(verdict.test_required, test_required)
         self.assertEqual(verdict.unlockable, not test_required)
         self.assertEqual(verdict.vectors, [idu.PasswordVector.name])
@@ -149,9 +149,12 @@ class CompatibilityTests(unittest.TestCase):
         self.assert_release("JIO_JIDU6701_R2.0.19.5", False)
 
     def test_r3_2_0_is_confirmed(self):
+        # a member-confirmed working build on the MTK family
         self.assert_release("ARCNJIO_JIDU6101_R3.2.0", False)
 
     def test_r3_2_1_requires_api_test(self):
+        # the fix had landed by R3.2.3 on MTK (stock 6701 rootfs): somewhere
+        # between R3.2.0 and there, so anything in between stays a TEST
         self.assert_release("ARCNJIO_JIDU6101_R3.2.1", True)
 
     def test_later_patch_requires_api_test(self):
@@ -159,6 +162,14 @@ class CompatibilityTests(unittest.TestCase):
 
     def test_unknown_version_requires_api_test(self):
         self.assert_release("ARCNJIO_JIDU6101", True)
+
+    def test_qualcomm_r3_2_6_is_confirmed(self):
+        # a member report on a JIDU6611: the password bug still ran on R3.2.6
+        self.assert_release("SRCMJIO_JIDU6611_R3.2.6", False, model="JIDU6611")
+
+    def test_qualcomm_beyond_report_requires_api_test(self):
+        # nothing beyond the R3.2.6 datapoint is known for the 6j11 builds
+        self.assert_release("SRCMJIO_JIDU6611_R3.2.7", True, model="JIDU6611")
 
 
 if __name__ == "__main__":

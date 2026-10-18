@@ -41,15 +41,23 @@ Or on Windows:
 ```
 
 Firmware matters. This tool has exactly one method, `changeUserPassword`, so the
-verdict is about that handler:
+verdict is about that handler — and the cutoff differs by family:
 
-- **`R3.2.0` and earlier** — the check reports `YES`; the password field is
-  injectable.
-- **`R3.2.1` and newer** — the check reports `TEST`. Do not expect much: the
-  handler is **fixed as of `R3.2.3`**, so `unlock` cannot work on that build or
-  newer — `detect` and `backup` still do. Which release between `R3.2.1` and
-  `R3.2.3` carries the fix is not known. See
-  [docs/INTERNALS.md](docs/INTERNALS.md#firmware-compatibility).
+- **`6j01` (MediaTek): `R3.2.0` and earlier** — the check reports `YES`; the
+  password field is injectable. A R3.2.0 unit confirmed it in the field.
+- **`6j01`: `R3.2.1` and newer** — `TEST`. The handler is fixed by `R3.2.3`
+  (read out of a stock `6j01`-family rootfs), so `unlock` cannot work once it
+  has landed — `detect` and `backup` still do. Which release between `R3.2.1`
+  and `R3.2.3` carries the fix is not known.
+- **`6j11` (Qualcomm): `R3.2.6` and earlier** — `YES`. A member of the
+  community confirmed the injection still runs on a `6j11` unit on `R3.2.6`,
+  the newest build it is confirmed to survive. Note the two families have
+  separate firmware branches: the fix described above has not shipped on the
+  Qualcomm builds as of `R3.2.6`.
+- Anything newer than a family's known-good build reports `TEST` — try
+  `unlock` and see.
+
+See [docs/INTERNALS.md](docs/INTERNALS.md#firmware-compatibility).
 
 ---
 
@@ -237,7 +245,10 @@ OpenWrt installation is documented separately:
 **[Installing OpenWrt →](OPENWRT.md)**
 
 Read that guide completely before flashing anything. The procedure differs by
-family: `6j01` installs over SSH, while `6j11` needs UART + U-Boot.
+family: `6j01` installs over SSH from stock open-source builds, while `6j11`
+has two routes — an SSH-only install using the
+[JIO-AX6000-6J11 community builds](https://github.com/themayankraut/JIO-AX6000-6J11-OpenWRT-SSH),
+or the older UART + U-Boot procedure.
 
 ---
 
@@ -387,5 +398,9 @@ The community OpenWrt flashing procedure documented in [OPENWRT.md](OPENWRT.md)
 builds on work by:
 
 **[the-diy-daddy/6j01_6j11](https://github.com/the-diy-daddy/6j01_6j11)**
+
+and, for the 6j11 SSH-only install route and its firmware builds:
+
+**[themayankraut/JIO-AX6000-6J11-OpenWRT-SSH](https://github.com/themayankraut/JIO-AX6000-6J11-OpenWRT-SSH)**
 
 If this project helped you, consider starring the repository ⭐

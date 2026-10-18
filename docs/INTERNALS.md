@@ -121,16 +121,18 @@ off its admin-session-kill branch.
 ## Firmware compatibility
 
 This tool has exactly one method, `changeUserPassword`, so everything here is
-about that handler. The version string is a hint, not a verdict; `check` reads it
-and reports `YES` or `TEST`:
+about that handler. The version string is a hint, not a verdict; `check` reads
+it — together with the router's family — and reports `YES` or `TEST`:
 
-| Build | `check` | Unlock |
-| --- | --- | --- |
-| `R3.2.0` and earlier | `YES` | the password field is injectable |
-| `R3.2.1` and newer | `TEST` | see below |
+| Family | Build | `check` | Unlock |
+| --- | --- | --- | --- |
+| MTK (`6j01`) | `R3.2.0` and earlier | `YES` | the password field is injectable |
+| MTK (`6j01`) | `R3.2.1` and newer | `TEST` | see below |
+| Qualcomm (`6j11`) | `R3.2.6` and earlier | `YES` | the password field is injectable (member-reported) |
+| Qualcomm (`6j11`) | `R3.2.7` and newer | `TEST` | no datapoint beyond `R3.2.6` yet |
 
-`TEST` is not a guess that it might work — the handler is **fixed as of
-`R3.2.3`**. Read from a stock `JIDU6701` rootfs on `R3.2.3`
+`TEST` is not a guess that it might work — on the 6j01 family the handler is
+**fixed by `R3.2.3`**. Read from a stock `JIDU6701` rootfs on `R3.2.3`
 (`usr/lib/lua/luci/model/jio/session.lua:182`):
 
 ```lua
@@ -146,12 +148,18 @@ function setPassword(username, password)
 
 The vendor's own comment names the bug — *"shell injection not taken care at
 application level"* — and `luci.sys.user.setpasswd` passes the password as an
-argument instead of through a shell. So on `R3.2.3` and newer, `unlock` cannot
-work at all. `detect` and `backup` are unaffected.
+argument instead of through a shell. So on a fixed build, `unlock` cannot work
+at all. `detect` and `backup` are unaffected.
 
 Which release between `R3.2.1` and `R3.2.3` carries the fix has not been
 determined; no image in that range has been examined. The check stays
 conservative for it, which is why `R3.2.1` and `R3.2.2` report `TEST`.
+
+The families ship separate firmware branches, and the fix has not reached the
+Qualcomm branch: a community member confirmed the password injection still
+running on a `6j11` unit on `R3.2.6`, the newest build it is confirmed to
+survive. `6j11` builds up to and including `R3.2.6` therefore report `YES`,
+and anything newer stays a `TEST` until someone reports a datapoint.
 
 ## Where the factory secrets live
 
