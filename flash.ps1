@@ -114,8 +114,13 @@ if (-not $Command) { $Command = 'auto' }
 # urllib3 1.x costs nothing and keeps the output clean.
 function Test-Python {
   param([string]$Exe, [string[]]$Prefix = @(), [string]$Code)
-  $probe = $Prefix + @('-c', $Code)
-  & $Exe @probe *> $null
+  # Windows PowerShell 5.1 strips embedded quotes in native command arguments.
+  # Send source on stdin so Python receives the quotes and newlines intact.
+  $probe = $Prefix + @('-')
+  # A failed candidate is normal; native stderr must not abort discovery under
+  # the script's Stop preference (even when redirected in PowerShell 5.1).
+  $ErrorActionPreference = 'SilentlyContinue'
+  $Code | & $Exe @probe *> $null
   return ($LASTEXITCODE -eq 0)
 }
 
