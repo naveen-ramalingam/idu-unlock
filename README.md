@@ -37,7 +37,8 @@ If you are looking for a network unlock, this is not that tool.
 | Qualcomm `6j11` | JIDU 6111 / 6411 / 6611 / 6811 / 6911 | Yes | Yes |
 
 Each model has its own flashing page, with the exact files and notes for that
-unit: [JIDU model guides](docs/models/README.md).
+unit: [JIDU model guides](docs/models/README.md). The 6j01 pages use the
+official OpenWrt images; the 6j11 pages use the community build.
 
 Not sure which one you have? Detection changes nothing:
 
@@ -234,10 +235,13 @@ Ready for OpenWrt
 Installation is documented separately:
 **[Installing OpenWrt](OPENWRT.md)**, which also has a
 [guide for each model](docs/models/README.md). Read it completely before
-flashing anything. The procedure differs by family: `6j01` installs over SSH
-from stock OpenWrt builds, while `6j11` has an SSH-only route using the
-[JIO-AX6000-6J11 community builds](https://github.com/themayankraut/JIO-AX6000-6J11-OpenWRT-SSH),
-or the older UART and U-Boot route.
+flashing anything.
+
+The `6j01` models have official OpenWrt images from 25.12.6 and install over
+UART and TFTP, with the SSH shortcut this project documents as the alternative.
+All five `6j11` models use the Mayank SSH method and the
+[JIO-AX6000-6J11 community builds](https://github.com/themayankraut/JIO-AX6000-6J11-OpenWRT-SSH);
+UART is recovery only.
 
 ## Questions people ask
 
