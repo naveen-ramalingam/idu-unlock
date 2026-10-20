@@ -31,6 +31,7 @@
 ## Contents
 
 - [Quick reference](#quick-reference)
+- [Pick your model](#pick-your-model)
 - [Before you start](#before-you-start)
 - [Get the images](#get-the-images)
 - [MediaTek 6j01](#mediatek-6j01-jidu-6201--6401--6601--6701)
@@ -55,6 +56,28 @@ Key facts:
 
 > The upstream flashing guide lists 6j01 as 6201 / 6401 / 6601 / 6701. The 6101 unlocks with `flash.sh` but is unverified for flashing — do not expect a tested path.
 
+## Pick your model
+
+Every supported model has its own page: the exact image names, the route it
+takes, its UART reference and the notes for that unit.
+
+| Model | Family | Guide |
+| --- | --- | --- |
+| JIDU6101 | MediaTek 6j01 | [install OpenWrt](docs/models/JIDU6101.md) |
+| JIDU6201 | MediaTek 6j01 | [install OpenWrt](docs/models/JIDU6201.md) |
+| JIDU6401 | MediaTek 6j01 | [install OpenWrt](docs/models/JIDU6401.md) |
+| JIDU6601 | MediaTek 6j01 | [install OpenWrt](docs/models/JIDU6601.md) |
+| JIDU6701 | MediaTek 6j01 | [install OpenWrt](docs/models/JIDU6701.md) |
+| JIDU6111 | Qualcomm 6j11 | [install OpenWrt](docs/models/JIDU6111.md) |
+| JIDU6411 | Qualcomm 6j11 | [install OpenWrt](docs/models/JIDU6411.md) |
+| JIDU6611 | Qualcomm 6j11 | [install OpenWrt](docs/models/JIDU6611.md) |
+| JIDU6811 | Qualcomm 6j11 | [install OpenWrt](docs/models/JIDU6811.md) |
+| JIDU6911 | Qualcomm 6j11 | [install OpenWrt](docs/models/JIDU6911.md) |
+
+The rest of this page is the shared procedure. The model pages say what is
+different for a particular unit.
+
+
 ## Before you start
 
 - [ ] `./flash.sh backup` completed — folder with one `.bin` per partition exists.
@@ -75,12 +98,15 @@ You need **two** files, both matching your family (`6j01` or `6j11`):
 ```
 
 ```
-…-jidu6j11-squashfs-factory.ubi         ← 6j11 stage 1 (community builds,
+…-jidu6j11-initramfs-factory.ubi        ← 6j11 stage 1 (community builds,
                                           route A; ends in plain *factory.ubi)
 …-jidu6j11-initramfs-uImage.itb         ← 6j11 stage 1, UART route B
                                           (upstream builds)
 …-jidu6j11-squashfs-sysupgrade.bin      ← 6j11, stage 2 — either source
 ```
+
+Community build filenames change between releases. Match the suffixes
+(`*-factory.ubi`, `*-sysupgrade.bin`), not the exact name in the example.
 
 Put both in one folder and open a terminal there. From here on, "the folder" means the image folder, usually **not** the `idu-unlock` folder. Commands below use example filenames — **substitute your actual filenames** every time.
 
@@ -203,7 +229,7 @@ Copy the `jioMfgData` output somewhere safe and offline (serial, MACs, Wi-Fi key
 From your **PC**, in the image folder:
 
 ```sh
-scp -O openwrt-qualcommbe-ipq95xx-jiorouter-ax6000-jidu6j11-squashfs-factory.ubi root@192.168.31.1:/tmp/
+scp -O openwrt-qualcommbe-ipq95xx-jiorouter_ax6000-jidu6j11-initramfs-factory.ubi root@192.168.31.1:/tmp/
 ```
 
 One file: the community builds' `*factory.ubi` is the whole initramfs UBI — it already bundles the kernel, and it is *not* the upstream `initramfs-uImage.itb` used for UART.
@@ -222,7 +248,7 @@ grep "\"$IDLE\"" /proc/mtd
 
 # 3. format and write it
 ubidetach -m 23
-ubiformat /dev/mtd23 -y -f /tmp/openwrt-qualcommbe-ipq95xx-jiorouter-ax6000-jidu6j11-squashfs-factory.ubi
+ubiformat /dev/mtd23 -y -f /tmp/openwrt-qualcommbe-ipq95xx-jiorouter_ax6000-jidu6j11-initramfs-factory.ubi
 
 # 4. tell the bootloader about the partition, then boot it
 fw_setenv mtdids 'nand0=nand0'
@@ -251,8 +277,8 @@ Via browser: `http://192.168.1.1` → **System → Backup / Flash Firmware → F
 Or via SSH from your PC:
 
 ```sh
-scp -O openwrt-qualcommbe-ipq95xx-jiorouter-ax6000-jidu6j11-squashfs-sysupgrade.bin root@192.168.1.1:/tmp/
-ssh root@192.168.1.1 sysupgrade -v /tmp/openwrt-qualcommbe-ipq95xx-jiorouter-ax6000-jidu6j11-squashfs-sysupgrade.bin
+scp -O openwrt-qualcommbe-ipq95xx-jiorouter_ax6000-jidu6j11-squashfs-sysupgrade.bin root@192.168.1.1:/tmp/
+ssh root@192.168.1.1 sysupgrade -v /tmp/openwrt-qualcommbe-ipq95xx-jiorouter_ax6000-jidu6j11-squashfs-sysupgrade.bin
 ```
 
 Wait **90 seconds**. The sysupgrade merges both A/B slots into one ~225 MB `ubi` partition; stock firmware is **permanently gone** at this point. The connection resets mid-command — that is normal. On the next boot it lands at `192.168.1.1` with ~171 MB usable storage.
@@ -284,7 +310,7 @@ Serve the image folder over TFTP from your PC at `192.168.1.2`, Ethernet to a ro
 ```
 setenv ipaddr 192.168.1.1
 setenv serverip 192.168.1.2
-tftpboot openwrt-qualcommbe-ipq95xx-jiorouter-ax6000-jidu6j11-initramfs-uImage.itb
+tftpboot openwrt-qualcommbe-ipq95xx-jiorouter_ax6000-jidu6j11-initramfs-uImage.itb
 bootm
 ```
 
@@ -297,8 +323,8 @@ Via browser: `http://192.168.1.1` → **System → Backup / Flash Firmware → F
 Or via SSH from your PC:
 
 ```sh
-scp -O openwrt-qualcommbe-ipq95xx-jiorouter-ax6000-jidu6j11-squashfs-sysupgrade.bin root@192.168.1.1:/tmp/
-ssh root@192.168.1.1 sysupgrade /tmp/openwrt-qualcommbe-ipq95xx-jiorouter-ax6000-jidu6j11-squashfs-sysupgrade.bin
+scp -O openwrt-qualcommbe-ipq95xx-jiorouter_ax6000-jidu6j11-squashfs-sysupgrade.bin root@192.168.1.1:/tmp/
+ssh root@192.168.1.1 sysupgrade /tmp/openwrt-qualcommbe-ipq95xx-jiorouter_ax6000-jidu6j11-squashfs-sysupgrade.bin
 ```
 
 ---
