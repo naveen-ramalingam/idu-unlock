@@ -38,8 +38,8 @@ If you are looking for a network unlock, this is not that tool.
 
 Each model has its own flashing page, with the exact files and notes for that
 unit: [JIDU model guides](docs/models/README.md). The 6j01 pages lead with
-SSH; the official UART image is the fallback. The 6j11 pages use the
-community build over SSH.
+SSH, then the official sysupgrade; the UART route is the fallback. The 6j11
+pages use the community build over SSH.
 
 Not sure which one you have? Detection changes nothing:
 
@@ -238,9 +238,11 @@ Installation is documented separately:
 [guide for each model](docs/models/README.md). Read it completely before
 flashing anything.
 
-SSH is the primary route across both families. The `6j01` models use the SSH
-shortcut first; the official 25.12.6 images install over UART and TFTP as the
-fallback. All five `6j11` models use the Mayank SSH method and the
+The `6j01` models use the SSH shortcut first, then the official 25.12.6
+sysupgrade; the UART route installs the same official image without the
+community stage 1. The 6101 forces its `jidu6101` image with `-F`; the other
+four match `jidu6j01` and do not need it. All five `6j11` models use the Mayank
+SSH method and the
 [JIO-AX6000-6J11 community builds](https://github.com/themayankraut/JIO-AX6000-6J11-OpenWRT-SSH);
 UART is recovery only.
 

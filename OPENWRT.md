@@ -44,15 +44,17 @@
 
 | Family | Models | Official OpenWrt | Primary route | Fallback |
 | --- | --- | --- | --- | --- |
-| MediaTek 6j01 | JIDU 6101 / 6201 / 6401 / 6601 / **6701** | Yes, 25.12.6+ | SSH shortcut (community stage 1) | UART + TFTP (official) |
+| MediaTek 6j01 | JIDU 6101 / 6201 / 6401 / 6601 / **6701** | Yes, 25.12.6+ | SSH, community stage 1 then official sysupgrade | UART + TFTP (official) |
 | Qualcomm 6j11 | JIDU 6111 / 6411 / 6611 / 6811 / 6911 | No, community | SSH (Mayank method) | UART (recovery) |
 
 Key facts:
 
 - Two stages, always: **initramfs** (temporary, runs in RAM) then
   **sysupgrade** (permanent). Stock firmware cannot overwrite itself safely.
-- 6j01: route A is SSH and ends on the community build. Route B is the
-  official image and needs 25.12.6 or newer for the SPI-NAND fix.
+- 6j01: both routes end on the official image. Route A is SSH plus a
+  community stage 1; route B is the unforced UART install.
+- 6j01: use **25.12.6 or newer** for the official image. The community stage 1
+  in route A performs the NAND write; if it predates the fix, use route B.
 - 6j11: there is no official image. All five models use the Mayank SSH
   method and the same community build.
 - Address change: stock is `192.168.31.1`, OpenWrt is `192.168.1.1`.
@@ -61,7 +63,8 @@ Key facts:
 - Unsure of your family? `./flash.sh detect` prints model and family.
 
 > The 6101 is covered by both routes. Route A writes the shared `jidu6j01`
-> community stage 1; route B installs the 6101-specific official image.
+> stage 1 and then the official `jidu6101` image with `-F`; route B installs
+> the 6101 image without forcing.
 
 ## Pick your model
 
@@ -81,8 +84,8 @@ takes, its UART reference and the notes for that unit.
 | JIDU6811 | Qualcomm 6j11 | No (community) | [install OpenWrt](docs/models/JIDU6811.md) |
 | JIDU6911 | Qualcomm 6j11 | No (community) | [install OpenWrt](docs/models/JIDU6911.md) |
 
-The 6j01 pages lead with SSH. The official UART install is the fallback. The
-6j11 pages use the Mayank SSH method; UART is recovery.
+The 6j01 pages lead with SSH, then the official sysupgrade. The UART route
+is the fallback. The 6j11 pages use the Mayank SSH method; UART is recovery.
 
 The rest of this page is the shared procedure. The model pages say what is
 different for a particular unit.
@@ -92,18 +95,21 @@ different for a particular unit.
 - [ ] `./flash.sh backup` completed. The folder has `uboot_credentials.env`
   and one `.bin` per partition.
 - [ ] Root SSH works for route A: `ssh -i ~/.ssh/idu_rsa root@192.168.31.1`.
-- [ ] The community stage-1 and sysupgrade files, for route A.
+- [ ] The community `jidu6j01` factory image and the official sysupgrade, for
+  route A. Rename the sysupgrade to `sysupgrade.bin`.
 - [ ] For 6j01 route B: a UART adapter (CH340 / PL2303 / CP2102) at **3.3 V**,
-  a TFTP server, and the official image pair from 25.12.6 or newer.
+  a TFTP server, and the official initramfs and sysupgrade from 25.12.6 or newer.
 - [ ] For 6j11 route B (recovery): a UART adapter at **3.3 V**.
 - [ ] Ethernet cable ready. Do not flash over Wi-Fi.
 
 ## Get the images
 
 **6j01, SSH (route A, primary).** You need the community
-`…-jidu6j01-initramfs-factory.ubi` and a `…-jidu6j01-squashfs-sysupgrade.bin`
-from the [firmware download folder](https://drive.google.com/drive/folders/16OvJoZeZFTx4dXRZWfGMlsy-RXDB54_h).
-The factory image is the part OpenWrt does not publish.
+`…-jidu6j01-initramfs-factory.ubi` and the official
+`…-<ident>-squashfs-sysupgrade.bin` from 25.12.6 or newer. The community
+factory image is in the [firmware download folder](https://drive.google.com/drive/folders/16OvJoZeZFTx4dXRZWfGMlsy-RXDB54_h);
+the sysupgrade is the official release. Rename the sysupgrade to
+`sysupgrade.bin`.
 
 **6j01, official (route B, fallback).** Open the [firmware selector](https://firmware-selector.openwrt.org/),
 search for your model, and download the `initramfs-kernel.bin` and
@@ -124,36 +130,35 @@ folder" means the image folder, usually **not** the `idu-unlock` folder.
 ## MediaTek 6j01 (JIDU 6101 / 6201 / 6401 / 6601 / 6701)
 
 OpenWrt supports these models officially. The 6101 has its own build
-(`jidu6101`); the other four share the `jidu6j01` build. The official images
-are `initramfs-kernel.bin` and `squashfs-sysupgrade.bin`, installed over UART
-and TFTP. The SSH shortcut is the primary route; the official UART install is
-the fallback.
+(`jidu6101`); the other four share the `jidu6j01` build. Both routes end on the
+official image. Route A uses SSH and a community stage 1; route B uses UART and
+the official initramfs.
 
-| Route | Needs | Ends on | Models |
+| Route | Stage 1 | Stage 2 | Needs |
 | --- | --- | --- | --- |
-| **A, SSH (primary)** | root SSH and the community `jidu6j01` files | the community build | all five |
-| **B, UART + TFTP (official)** | 3.3 V UART adapter, TFTP server, official files | official OpenWrt | all five |
+| **A, SSH (primary)** | community `jidu6j01` factory.ubi | official sysupgrade | root SSH |
+| **B, UART + TFTP (official)** | official initramfs | official sysupgrade | UART + TFTP |
 
-Route A is the route this project uses. It writes a community `factory.ubi` to
-the spare slot, boots it, then installs the sysupgrade from the same folder. It
-ends on that build, not necessarily the current official release. On the 6101
-it writes the shared `jidu6j01` stage 1; use route B if you want the
-6101-specific official image.
+Route A is the shortcut. It writes the community `factory.ubi` to the spare
+slot, boots it, then installs the official sysupgrade. The community stage 1 is
+only the vehicle. On the 6101 it writes the shared `jidu6j01` stage 1, then the
+official `jidu6101` sysupgrade with `-F`; route B installs the 6101 image
+without forcing.
 
-Route B is what OpenWrt documents. It is the only route that gives you the
-official image and the 25.12.6 SPI-NAND fix out of the box.
+Route B is the unforced official install. It skips the community stage 1, so
+the 25.12.6 SPI-NAND fix is in the kernel that performs the write.
 
 > **Use 25.12.6 or newer for the official image.** Before 25.12.6, the
 > SPI-NAND could silently fail to erase or write during sysupgrade. The fix is
 > [PR 25122](https://github.com/openwrt/openwrt/pull/25122), merged on
 > 11 September 2026 and included in the 25.12.6 images. The community stage 1
-> in route A may predate the fix; if it does, use route B.
+> in route A performs the write; if it predates the fix, use route B.
 
 ### Route A: SSH (primary)
 
 This is the shortcut. It writes a community `factory.ubi` to the spare slot,
-boots it, then installs the sysupgrade from the same folder. It ends on that
-build, not necessarily the current official release.
+boots it, then installs the official sysupgrade. The community stage 1 is only
+the vehicle; both routes end on the official image.
 
 #### A1. Confirm the layout
 
@@ -205,21 +210,33 @@ Wait about a minute, then:
 ssh root@192.168.1.1
 ```
 
-#### A5. Install the sysupgrade
+#### A5. Install the official sysupgrade
 
-From your PC:
+Rename the official sysupgrade to `sysupgrade.bin` so the command stays short.
+For the 6201 / 6401 / 6601 / 6701, that is the `jidu6j01` image. The stage 1
+and the image both report `jidu6j01`, so no force is needed. From your PC:
 
 ```sh
-scp -O openwrt-mediatek-filogic-jiorouter_ax6000-jidu6j01-squashfs-sysupgrade.bin root@192.168.1.1:/tmp/
-ssh root@192.168.1.1 "sysupgrade /tmp/openwrt-mediatek-filogic-jiorouter_ax6000-jidu6j01-squashfs-sysupgrade.bin"
+scp -O sysupgrade.bin root@192.168.1.1:/tmp/
+ssh root@192.168.1.1 "sysupgrade /tmp/sysupgrade.bin"
 ```
 
-It reboots. Do not touch it until it returns at `192.168.1.1`. Set a root
-password on first login.
+For the 6101, the official image is `jidu6101`, but the stage 1 reports
+`jidu6j01`. `sysupgrade` will refuse it. The image is the correct 6101 build;
+add `-F` to skip the board-name check. Only do that with the backup and a UART
+recovery path ready, or use route B.
+
+```sh
+scp -O sysupgrade.bin root@192.168.1.1:/tmp/
+ssh root@192.168.1.1 "sysupgrade -F /tmp/sysupgrade.bin"
+```
+
+It reboots into the official image. Wait for `192.168.1.1`, then set a root
+password.
 
 ### Route B: UART + TFTP (official fallback)
 
-This is the install OpenWrt documents. It works on all four shared `jidu6j01`
+This is the unforced official install. It works on all four shared `jidu6j01`
 models, and the 6101 has its own image. The DIY repo's `6101_commands.md` has
 the same steps for the 6101.
 
@@ -300,9 +317,8 @@ ssh root@192.168.1.1 "sysupgrade /tmp/sysupgrade.bin"
 Or open `http://192.168.1.1`, log in, and use **System → Backup / Flash
 Firmware → Flash image…** with `sysupgrade.bin`. Do not tick *Keep settings*.
 
-It writes the flash and reboots. Wait until it answers at `192.168.1.1` again,
-then set a root password. The stock firmware is gone at that point; the backup
-is the way back.
+It writes the official image and reboots. Wait until it answers at
+`192.168.1.1` again, then set a root password.
 
 ### If it goes wrong
 
@@ -313,6 +329,10 @@ is the way back.
   use route B.
 - **It still boots stock:** check that `fw_setenv bootcmd` took, and that the
   three `dual_boot.*` variables are set. If it still boots stock, use route B.
+- **Sysupgrade refuses the image:** for the 6101, the stage 1 reports
+  `jidu6j01`, so the official `jidu6101` image needs `-F`. Only force it with
+  the backup and a UART recovery path, or use route B. For the four, a refusal
+  means you downloaded the wrong image.
 - **TFTP times out:** check the PC address (`192.168.1.2`), the server's bind
   address, the firewall, and that the file is named exactly `initramfs.bin`.
 - **`Bad FIT` or a signature error:** the `fdt rm /signature` line was missed,
@@ -508,9 +528,10 @@ setenv bootargs 'console=ttyMSM0,115200n8 cnss2.bdf_pci1=0xb7 cnss2.bdf_integrat
 
 Upstream documents no revert for this family; all pieces are in your backup.
 
-These steps assume route A, which only writes `mtd6`. If you used route B, the
-official sysupgrade replaced the UBI layout: restore every `mtdN` image from
-the backup over UART, then restore `bootcmd` and `ipaddr` from `uboot_env.txt`.
+These steps assume the flash failed before sysupgrade, so only `mtd6` changed.
+If sysupgrade ran, it may have replaced the UBI layout: restore every `mtdN`
+image from the backup over UART, then restore `bootcmd` and `ipaddr` from
+`uboot_env.txt`.
 
 1. `uboot_env.txt` — original `bootcmd` and `ipaddr`. Restore with `fw_setenv`, and drop the three `dual_boot.*` variables you set.
 2. `backup/mtd6_ubi2.bin` — the stock system image:
@@ -565,8 +586,9 @@ Official 6j01 support and the UART and TFTP install come from OpenWrt:
 [fe3efbd7](https://github.com/openwrt/openwrt/commit/fe3efbd7da) for the
 JIDU6101 and [552e617b](https://github.com/openwrt/openwrt/commit/552e617bd0)
 for the JIDU6J01. The SPI-NAND fix is
-[PR 25122](https://github.com/openwrt/openwrt/pull/25122). The 6j01 SSH shortcut (route A)
-and the 6j11 UART recovery steps come from
+[PR 25122](https://github.com/openwrt/openwrt/pull/25122). The 6j01 SSH
+shortcut (route A), its community stage 1, and the 6j11 UART recovery steps
+come from
 [the-diy-daddy/6j01_6j11](https://github.com/the-diy-daddy/6j01_6j11),
 including its
 [6101_commands.md](https://github.com/the-diy-daddy/6j01_6j11/blob/main/6101_commands.md).
