@@ -13,12 +13,13 @@
 >   routers die.
 > - **No warranty, no liability.** Provided as is — see the README.
 >
-> The procedure below is the community's method, worked out by
+> The SSH shortcut below is the community's method, worked out by
 > [the-diy-daddy](https://github.com/the-diy-daddy/6j01_6j11) and, for 6j11
 > route A, by
-> [JIO-AX6000-6J11-OpenWRT-SSH](https://github.com/themayankraut/JIO-AX6000-6J11-OpenWRT-SSH) — see
-> *Where this comes from* at the end. This project only writes it down more
-> slowly; it does not automate it, and cannot do any of it for you.
+> [JIO-AX6000-6J11-OpenWRT-SSH](https://github.com/themayankraut/JIO-AX6000-6J11-OpenWRT-SSH).
+> See *Where this comes from* at the end. The 6j01 official route is from OpenWrt.
+> This project only writes it down more slowly; it does not automate the
+> flash, and cannot do any of it for you.
 
 ---
 
@@ -41,24 +42,26 @@
 
 ## Quick reference
 
-| Family | Models | Official OpenWrt | Flashing needs | Stage 1 | Stage 2 |
-| --- | --- | --- | --- | --- | --- |
-| MediaTek 6j01 | JIDU 6101 / 6201 / 6401 / 6601 / **6701** | Yes, 25.12.6+ | UART + TFTP (official), or SSH shortcut | `…-initramfs-kernel.bin` (official) or `…-factory.ubi` (shortcut) | `…-squashfs-sysupgrade.bin` |
-| Qualcomm 6j11 | JIDU 6111 / 6411 / 6611 / 6811 / 6911 | No, community | SSH (Mayank method); UART recovery | `…-factory.ubi` | `…-squashfs-sysupgrade.bin` |
+| Family | Models | Official OpenWrt | Primary route | Fallback |
+| --- | --- | --- | --- | --- |
+| MediaTek 6j01 | JIDU 6101 / 6201 / 6401 / 6601 / **6701** | Yes, 25.12.6+ | SSH shortcut (community stage 1) | UART + TFTP (official) |
+| Qualcomm 6j11 | JIDU 6111 / 6411 / 6611 / 6811 / 6911 | No, community | SSH (Mayank method) | UART (recovery) |
 
 Key facts:
 
-- Two stages, always: **initramfs** (temporary, runs in RAM) then **sysupgrade** (permanent). Stock firmware cannot overwrite itself safely.
-- 6j01: use **25.12.6 or newer**. That release includes the SPI-NAND fix; older 25.12 builds could silently fail to write the flash.
-- 6j11: there is no official image. All five models use the Mayank SSH method and the same community build.
+- Two stages, always: **initramfs** (temporary, runs in RAM) then
+  **sysupgrade** (permanent). Stock firmware cannot overwrite itself safely.
+- 6j01: route A is SSH and ends on the community build. Route B is the
+  official image and needs 25.12.6 or newer for the SPI-NAND fix.
+- 6j11: there is no official image. All five models use the Mayank SSH
+  method and the same community build.
 - Address change: stock is `192.168.31.1`, OpenWrt is `192.168.1.1`.
 - Use Ethernet, not Wi-Fi. Wi-Fi on the temporary system is unreliable or absent.
 - **Never pull power** during `ubiformat` or `sysupgrade`.
 - Unsure of your family? `./flash.sh detect` prints model and family.
 
-> The 6101 is covered by both routes: OpenWrt ships a `jidu6101` image, and
-> the DIY repo has `6101_commands.md`. Route A installs the 6101-specific
-> official image; route B writes the shared `jidu6j01` community stage 1.
+> The 6101 is covered by both routes. Route A writes the shared `jidu6j01`
+> community stage 1; route B installs the 6101-specific official image.
 
 ## Pick your model
 
@@ -78,30 +81,35 @@ takes, its UART reference and the notes for that unit.
 | JIDU6811 | Qualcomm 6j11 | No (community) | [install OpenWrt](docs/models/JIDU6811.md) |
 | JIDU6911 | Qualcomm 6j11 | No (community) | [install OpenWrt](docs/models/JIDU6911.md) |
 
+The 6j01 pages lead with SSH. The official UART install is the fallback. The
+6j11 pages use the Mayank SSH method; UART is recovery.
+
 The rest of this page is the shared procedure. The model pages say what is
 different for a particular unit.
 
 ## Before you start
 
-- [ ] `./flash.sh backup` completed. The folder has `uboot_credentials.env` and one `.bin` per partition.
-- [ ] The image pair for your family and route (see below).
-- [ ] For 6j01 route A: a UART adapter (CH340 / PL2303 / CP2102) at **3.3 V** and a TFTP server.
-- [ ] For 6j01 route B or 6j11 route A: root SSH works, `ssh -i ~/.ssh/idu_rsa root@192.168.31.1`.
-- [ ] For 6j11 UART recovery: a UART adapter at **3.3 V**.
+- [ ] `./flash.sh backup` completed. The folder has `uboot_credentials.env`
+  and one `.bin` per partition.
+- [ ] Root SSH works for route A: `ssh -i ~/.ssh/idu_rsa root@192.168.31.1`.
+- [ ] The community stage-1 and sysupgrade files, for route A.
+- [ ] For 6j01 route B: a UART adapter (CH340 / PL2303 / CP2102) at **3.3 V**,
+  a TFTP server, and the official image pair from 25.12.6 or newer.
+- [ ] For 6j11 route B (recovery): a UART adapter at **3.3 V**.
 - [ ] Ethernet cable ready. Do not flash over Wi-Fi.
 
 ## Get the images
 
-**6j01, official (route A).** Open the [firmware selector](https://firmware-selector.openwrt.org/),
+**6j01, SSH (route A, primary).** You need the community
+`…-jidu6j01-initramfs-factory.ubi` and a `…-jidu6j01-squashfs-sysupgrade.bin`
+from the [firmware download folder](https://drive.google.com/drive/folders/16OvJoZeZFTx4dXRZWfGMlsy-RXDB54_h).
+The factory image is the part OpenWrt does not publish.
+
+**6j01, official (route B, fallback).** Open the [firmware selector](https://firmware-selector.openwrt.org/),
 search for your model, and download the `initramfs-kernel.bin` and
 `squashfs-sysupgrade.bin` from 25.12.6 or newer. The 6101 uses the `jidu6101`
 names; the 6201 / 6401 / 6601 / 6701 share the `jidu6j01` names. The model
 pages list the exact files.
-
-**6j01, SSH shortcut (route B).** You need the community
-`…-jidu6j01-initramfs-factory.ubi` and a `…-jidu6j01-squashfs-sysupgrade.bin`
-from the [firmware download folder](https://drive.google.com/drive/folders/16OvJoZeZFTx4dXRZWfGMlsy-RXDB54_h).
-The factory image is the part OpenWrt does not publish.
 
 **6j11.** There is no official image. All five models use the community builds
 from [themayankraut/JIO-AX6000-6J11-OpenWRT-SSH](https://github.com/themayankraut/JIO-AX6000-6J11-OpenWRT-SSH)
@@ -117,30 +125,105 @@ folder" means the image folder, usually **not** the `idu-unlock` folder.
 
 OpenWrt supports these models officially. The 6101 has its own build
 (`jidu6101`); the other four share the `jidu6j01` build. The official images
-are `initramfs-kernel.bin` and `squashfs-sysupgrade.bin`. There is no official
-`factory.ubi`, so the official install goes through UART and TFTP.
-
-There are two ways in:
+are `initramfs-kernel.bin` and `squashfs-sysupgrade.bin`, installed over UART
+and TFTP. The SSH shortcut is the primary route; the official UART install is
+the fallback.
 
 | Route | Needs | Ends on | Models |
 | --- | --- | --- | --- |
-| **A, UART and TFTP (official)** | UART adapter at 3.3 V, TFTP server, U-Boot password | the official OpenWrt release | all five |
-| **B, SSH shortcut** | root SSH only | the build in the community folder | all five |
+| **A, SSH (primary)** | root SSH and the community `jidu6j01` files | the community build | all five |
+| **B, UART + TFTP (official)** | 3.3 V UART adapter, TFTP server, official files | official OpenWrt | all five |
 
-Route A is what OpenWrt documents. Route B is the shortcut this project used
-before official support; it needs a community stage-1 image because OpenWrt
-does not publish a `factory.ubi`. On the 6101, route B writes the shared
-`jidu6j01` stage 1; use route A if you want the 6101-specific official image.
+Route A is the route this project uses. It writes a community `factory.ubi` to
+the spare slot, boots it, then installs the sysupgrade from the same folder. It
+ends on that build, not necessarily the current official release. On the 6101
+it writes the shared `jidu6j01` stage 1; use route B if you want the
+6101-specific official image.
 
-> **Use 25.12.6 or newer.** Before 25.12.6, the SPI-NAND could silently fail to
-> erase or write during sysupgrade. The fix is
+Route B is what OpenWrt documents. It is the only route that gives you the
+official image and the 25.12.6 SPI-NAND fix out of the box.
+
+> **Use 25.12.6 or newer for the official image.** Before 25.12.6, the
+> SPI-NAND could silently fail to erase or write during sysupgrade. The fix is
 > [PR 25122](https://github.com/openwrt/openwrt/pull/25122), merged on
-> 11 September 2026 and included in the 25.12.6 images. Do not use an older
-> 25.12 build for the first flash.
+> 11 September 2026 and included in the 25.12.6 images. The community stage 1
+> in route A may predate the fix; if it does, use route B.
 
-### Route A: UART and TFTP (official)
+### Route A: SSH (primary)
 
-#### A1. Download the pair for your model
+This is the shortcut. It writes a community `factory.ubi` to the spare slot,
+boots it, then installs the sysupgrade from the same folder. It ends on that
+build, not necessarily the current official release.
+
+#### A1. Confirm the layout
+
+On the router:
+
+```sh
+ssh -i ~/.ssh/idu_rsa root@192.168.31.1
+cat /proc/mtd
+```
+
+Expect `mtd6` to be `ubi2`, the vendor's spare slot. If your table does not
+match, stop and compare it with `partitions.txt` in your backup.
+
+#### A2. Send the community stage 1
+
+From your PC, in the folder with the community images:
+
+```sh
+scp -O openwrt-mediatek-filogic-jiorouter_ax6000-jidu6j01-initramfs-factory.ubi root@192.168.31.1:/tmp/
+```
+
+#### A3. Write it and set the boot variables
+
+On the router:
+
+```sh
+ubidetach -m 6
+ubiformat /dev/mtd6 -y -f /tmp/openwrt-mediatek-filogic-jiorouter_ax6000-jidu6j01-initramfs-factory.ubi
+
+fw_setenv bootcmd 'ubi detach; ubi part ubi2; ubi read 46000000 kernel; fdt addr $(fdtcontroladdr); fdt rm /signature; bootm 0x46000000'
+fw_setenv dual_boot.current_slot 1
+fw_setenv dual_boot.slot_0_invalid 1
+fw_setenv dual_boot.slot_1_invalid 1
+fw_setenv ipaddr
+```
+
+**Point of no return** for the stock system on `mtd6`. Keep the single quotes:
+`$(fdtcontroladdr)` must reach U-Boot literally.
+
+#### A4. Boot the temporary system
+
+```sh
+reboot
+```
+
+Wait about a minute, then:
+
+```sh
+ssh root@192.168.1.1
+```
+
+#### A5. Install the sysupgrade
+
+From your PC:
+
+```sh
+scp -O openwrt-mediatek-filogic-jiorouter_ax6000-jidu6j01-squashfs-sysupgrade.bin root@192.168.1.1:/tmp/
+ssh root@192.168.1.1 "sysupgrade /tmp/openwrt-mediatek-filogic-jiorouter_ax6000-jidu6j01-squashfs-sysupgrade.bin"
+```
+
+It reboots. Do not touch it until it returns at `192.168.1.1`. Set a root
+password on first login.
+
+### Route B: UART + TFTP (official fallback)
+
+This is the install OpenWrt documents. It works on all four shared `jidu6j01`
+models, and the 6101 has its own image. The DIY repo's `6101_commands.md` has
+the same steps for the 6101.
+
+#### B1. Download the pair for your model
 
 Open the [firmware selector](https://firmware-selector.openwrt.org/), search
 for your model, and pick the current stable release (25.12.6 or newer). The
@@ -164,27 +247,27 @@ mv openwrt-*-jidu6j01-initramfs-kernel.bin initramfs.bin
 mv openwrt-*-jidu6j01-squashfs-sysupgrade.bin sysupgrade.bin
 ```
 
-#### A2. Get the U-Boot password
+#### B2. Get the U-Boot password
 
 `flash.sh backup` saved the stock U-Boot username and password in
 `<backup-folder>/uboot_credentials.env`. You need them at the U-Boot prompt on
 the `jidu6j01` models. The 6101 normally goes straight to the prompt; if it
 asks, try the same file.
 
-#### A3. Serve the initramfs over TFTP
+#### B3. Serve the initramfs over TFTP
 
 Put `initramfs.bin` in the root of a TFTP server and give your PC the address
 `192.168.1.2` on the Ethernet interface you will use. Any TFTP server works;
 the router only needs the file name and the server address.
 
-#### A4. Open the UART and stop the boot
+#### B4. Open the UART and stop the boot
 
 Connect the UART adapter at **115200 8N1**, open the console, and power on the
 router. At the boot menu, select **Failsafe Mode**, then press `Ctrl-C` to
 interrupt and reach the U-Boot prompt. Log in with the credentials from
 `uboot_credentials.env` if it asks.
 
-#### A5. Boot the initramfs
+#### B5. Boot the initramfs
 
 At the U-Boot prompt:
 
@@ -204,7 +287,7 @@ rejects the image.
 The router is now running the initramfs from RAM. Nothing has been written to
 the flash yet.
 
-#### A6. Install the sysupgrade
+#### B6. Install the sysupgrade
 
 After about a minute, the initramfs answers at `192.168.1.1`. From your PC, in
 the folder with `sysupgrade.bin`:
@@ -221,79 +304,15 @@ It writes the flash and reboots. Wait until it answers at `192.168.1.1` again,
 then set a root password. The stock firmware is gone at that point; the backup
 is the way back.
 
-### Route B: SSH shortcut (all five 6j01 models)
-
-This is the path this project documented before official support. It writes a
-community `factory.ubi` to the spare slot, boots it, then installs the
-sysupgrade from the same folder. It ends on that build, not necessarily the
-current official release. The DIY repo lists the 6101 under this method too;
-on the 6101 it writes the shared `jidu6j01` stage 1, so use route A if you want
-the 6101-specific official image.
-
-#### B1. Confirm the layout
-
-On the router:
-
-```sh
-ssh -i ~/.ssh/idu_rsa root@192.168.31.1
-cat /proc/mtd
-```
-
-Expect `mtd6` to be `ubi2`, the vendor's spare slot. If your table does not
-match, stop and compare it with `partitions.txt` in your backup.
-
-#### B2. Send the community stage 1
-
-From your PC, in the folder with the community images:
-
-```sh
-scp -O openwrt-mediatek-filogic-jiorouter_ax6000-jidu6j01-initramfs-factory.ubi root@192.168.31.1:/tmp/
-```
-
-#### B3. Write it and set the boot variables
-
-On the router:
-
-```sh
-ubidetach -m 6
-ubiformat /dev/mtd6 -y -f /tmp/openwrt-mediatek-filogic-jiorouter_ax6000-jidu6j01-initramfs-factory.ubi
-
-fw_setenv bootcmd 'ubi detach; ubi part ubi2; ubi read 46000000 kernel; fdt addr $(fdtcontroladdr); fdt rm /signature; bootm 0x46000000'
-fw_setenv dual_boot.current_slot 1
-fw_setenv dual_boot.slot_0_invalid 1
-fw_setenv dual_boot.slot_1_invalid 1
-fw_setenv ipaddr
-```
-
-**Point of no return** for the stock system on `mtd6`. Keep the single quotes:
-`$(fdtcontroladdr)` must reach U-Boot literally.
-
-#### B4. Boot the temporary system
-
-```sh
-reboot
-```
-
-Wait about a minute, then:
-
-```sh
-ssh root@192.168.1.1
-```
-
-#### B5. Install the sysupgrade
-
-From your PC:
-
-```sh
-scp -O openwrt-mediatek-filogic-jiorouter_ax6000-jidu6j01-squashfs-sysupgrade.bin root@192.168.1.1:/tmp/
-ssh root@192.168.1.1 "sysupgrade /tmp/openwrt-mediatek-filogic-jiorouter_ax6000-jidu6j01-squashfs-sysupgrade.bin"
-```
-
-It reboots. Do not touch it until it returns at `192.168.1.1`. Set a root
-password on first login.
-
 ### If it goes wrong
 
+- **SSH is refused:** check that you are on `192.168.31.1` (stock) or
+  `192.168.1.1` (temporary), and that Dropbear is running. If you skipped the
+  unlock step, run `./flash.sh unlock` first.
+- **`fw_setenv` is missing:** stock firmware should have it. If it does not,
+  use route B.
+- **It still boots stock:** check that `fw_setenv bootcmd` took, and that the
+  three `dual_boot.*` variables are set. If it still boots stock, use route B.
 - **TFTP times out:** check the PC address (`192.168.1.2`), the server's bind
   address, the firewall, and that the file is named exactly `initramfs.bin`.
 - **`Bad FIT` or a signature error:** the `fdt rm /signature` line was missed,
@@ -317,7 +336,7 @@ UART is recovery only.
 
 | Route | Needs | When to use |
 | --- | --- | --- |
-| **A, SSH (Mayank method)** | your existing root SSH, no serial adapter | all five models; the normal path |
+| **A, SSH (Mayank method, primary)** | your existing root SSH, no serial adapter | all five models; the normal path |
 | **B, UART (recovery)** | opened case, UART adapter at 3.3 V, u-boot console login | recovery, or if route A keeps failing |
 
 Route A uses the **6j11 community builds** (see
@@ -337,7 +356,7 @@ jioMfgData get all
 
 Copy the `jioMfgData` output somewhere safe and offline (serial, MACs, Wi-Fi keys). Your `flash.sh backup` already saved it as `credentials.txt` — this is a second copy. Note which slot `/proc/cmdline` says is active: it is `ubi.mtd=rootfs` or `ubi.mtd=rootfs_1`, and the **other** one is the slot you will flash. Both routes below use that.
 
-### Route A: SSH-only (no UART)
+### Route A: SSH (Mayank method, primary)
 
 #### A1. Send the stage-1 image
 
@@ -400,7 +419,7 @@ Wait **90 seconds**. The sysupgrade merges both A/B slots into one ~225 MB `ubi`
 
 ### Route B: UART recovery (u-boot over serial)
 
-Flashing happens from u-boot over UART — for when route A is not available.
+Flashing happens from u-boot over UART, for when route A is not available.
 
 #### B1. Reset vendor data
 
@@ -461,7 +480,7 @@ Single quotes again — the `( )` must reach u-boot untouched.
 </details>
 
 <details>
-<summary><strong>Going back to stock — 6j11 (documented upstream)</strong></summary>
+<summary><strong>Going back to stock: 6j11 (documented upstream)</strong></summary>
 
 Get saved `mtd23`/`mtd24` images onto the router, then:
 
@@ -485,11 +504,11 @@ setenv bootargs 'console=ttyMSM0,115200n8 cnss2.bdf_pci1=0xb7 cnss2.bdf_integrat
 </details>
 
 <details>
-<summary><strong>Going back to stock — 6j01 (reconstructed from backup)</strong></summary>
+<summary><strong>Going back to stock: 6j01 (reconstructed from backup)</strong></summary>
 
 Upstream documents no revert for this family; all pieces are in your backup.
 
-These steps assume route B, which only writes `mtd6`. If you used route A, the
+These steps assume route A, which only writes `mtd6`. If you used route B, the
 official sysupgrade replaced the UBI layout: restore every `mtdN` image from
 the backup over UART, then restore `bootcmd` and `ipaddr` from `uboot_env.txt`.
 
@@ -546,12 +565,12 @@ Official 6j01 support and the UART and TFTP install come from OpenWrt:
 [fe3efbd7](https://github.com/openwrt/openwrt/commit/fe3efbd7da) for the
 JIDU6101 and [552e617b](https://github.com/openwrt/openwrt/commit/552e617bd0)
 for the JIDU6J01. The SPI-NAND fix is
-[PR 25122](https://github.com/openwrt/openwrt/pull/25122). The 6j01 SSH
-shortcut and the 6j11 UART steps come from
+[PR 25122](https://github.com/openwrt/openwrt/pull/25122). The 6j01 SSH shortcut (route A)
+and the 6j11 UART recovery steps come from
 [the-diy-daddy/6j01_6j11](https://github.com/the-diy-daddy/6j01_6j11),
 including its
 [6101_commands.md](https://github.com/the-diy-daddy/6j01_6j11/blob/main/6101_commands.md).
-The **6j11 SSH route (A)**, its idle-slot detection and the community builds
+The **6j11 SSH route (A, primary)**, its idle-slot detection and the community builds
 come from
 [themayankraut/JIO-AX6000-6J11-OpenWRT-SSH](https://github.com/themayankraut/JIO-AX6000-6J11-OpenWRT-SSH).
 Credit belongs with them. If stuck, those repositories are the better place

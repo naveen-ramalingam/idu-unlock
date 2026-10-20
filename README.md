@@ -37,8 +37,9 @@ If you are looking for a network unlock, this is not that tool.
 | Qualcomm `6j11` | JIDU 6111 / 6411 / 6611 / 6811 / 6911 | Yes | Yes |
 
 Each model has its own flashing page, with the exact files and notes for that
-unit: [JIDU model guides](docs/models/README.md). The 6j01 pages use the
-official OpenWrt images; the 6j11 pages use the community build.
+unit: [JIDU model guides](docs/models/README.md). The 6j01 pages lead with
+SSH; the official UART image is the fallback. The 6j11 pages use the
+community build over SSH.
 
 Not sure which one you have? Detection changes nothing:
 
@@ -237,9 +238,9 @@ Installation is documented separately:
 [guide for each model](docs/models/README.md). Read it completely before
 flashing anything.
 
-The `6j01` models have official OpenWrt images from 25.12.6 and install over
-UART and TFTP, with the SSH shortcut this project documents as the alternative.
-All five `6j11` models use the Mayank SSH method and the
+SSH is the primary route across both families. The `6j01` models use the SSH
+shortcut first; the official 25.12.6 images install over UART and TFTP as the
+fallback. All five `6j11` models use the Mayank SSH method and the
 [JIO-AX6000-6J11 community builds](https://github.com/themayankraut/JIO-AX6000-6J11-OpenWRT-SSH);
 UART is recovery only.
 
@@ -405,10 +406,10 @@ cookie path, so `requests` throws it away, and a sitting admin session never
 expires on a `6j11` unit, so waiting for it cannot work. Both fixes are in
 `idu.py`, and they came out of rooting a JIDU6611.
 
-The community OpenWrt flashing procedure documented in [OPENWRT.md](OPENWRT.md)
+The OpenWrt flashing procedure documented in [OPENWRT.md](OPENWRT.md)
 builds on work by
 **[the-diy-daddy/6j01_6j11](https://github.com/the-diy-daddy/6j01_6j11)**, and,
-for the 6j11 SSH-only install route and its firmware builds, by
+for the 6j11 SSH install route and its firmware builds, by
 **[themayankraut/JIO-AX6000-6J11-OpenWRT-SSH](https://github.com/themayankraut/JIO-AX6000-6J11-OpenWRT-SSH)**.
 
 If this project helped you, consider starring the repository.
