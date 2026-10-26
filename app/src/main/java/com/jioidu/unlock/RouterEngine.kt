@@ -13,6 +13,7 @@ class RouterEngine(private val context: Context) {
         routerUrl: String,
         adminPassword: String,
         backupTree: Uri?,
+        confirmCertificate: (host: String, fingerprint: String) -> Boolean,
         log: (String) -> Unit
     ): RouterResult {
         if (action == RouterAction.UNLOCK) {
@@ -27,7 +28,20 @@ class RouterEngine(private val context: Context) {
         val host = privateRouterAddress(routerUrl)
         if (adminPassword.isBlank()) throw RouterFailure("Enter the router admin password.")
 
-        RouterApi(routerUrl).use { api ->
+        val pinKey = RouterTls.pinKey(routerUrl)
+        val pins = context.getSharedPreferences("router_certificate_pins", Context.MODE_PRIVATE)
+        val observedPin = RouterTls.fingerprint(routerUrl)
+        val savedPin = pins.getString(pinKey, null)
+        if (savedPin == null) {
+            if (!confirmCertificate(host, observedPin)) {
+                throw RouterFailure("Certificate was not independently verified. No password was sent.")
+            }
+            pins.edit().putString(pinKey, observedPin).apply()
+        } else if (savedPin != observedPin) {
+            throw RouterFailure("Router certificate changed. Password was not sent. Clear this app's data only after independently verifying the new certificate.")
+        }
+
+        RouterApi(routerUrl, observedPin).use { api ->
             log("Connecting to $host…")
             val device = api.connect(adminPassword)
             log("Device: ${device.model} (${device.family}).")

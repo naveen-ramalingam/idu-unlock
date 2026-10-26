@@ -8,11 +8,7 @@ import java.net.URI
 import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.security.SecureRandom
-import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.HttpsURLConnection
-import javax.net.ssl.SSLContext
-import javax.net.ssl.TrustManager
-import javax.net.ssl.X509TrustManager
 
 internal class RouterFailure(message: String) : Exception(message)
 
@@ -29,6 +25,18 @@ internal data class RouterDevice(
 }
 
 internal data class Compatibility(val firmware: String, val message: String, val confirmed: Boolean)
+
+internal fun routerDeviceFromFlags(
+    loginFlags: Map<String, String>,
+    postLoginFlags: Map<String, String>?
+): RouterDevice {
+    val flags = postLoginFlags ?: loginFlags
+    return RouterDevice(
+        flags["DEVICE_MODEL"] ?: "unknown",
+        flags["DEVICE_SYSTEM_NAME"] ?: "?",
+        flags["BOARD_NAME"] ?: "?"
+    )
+}
 
 internal fun checkCompatibility(device: RouterDevice, firmware: String): Compatibility {
     val version = Regex("""_R(\d+(?:\.\d+)+)""").find(firmware)?.groupValues?.get(1)
@@ -72,27 +80,18 @@ internal fun privateRouterAddress(value: String): String {
     return host
 }
 
-internal class RouterApi(private val baseUrl: String) : Closeable {
+internal class RouterApi(private val baseUrl: String, private val certificatePin: String) : Closeable {
     val host = privateRouterAddress(baseUrl)
     private var token: String? = null
     private var sessionCookie: String? = null
     private val rng = SecureRandom()
     private val rpcUrl = URL(baseUrl.trim().trimEnd('/') + "/WCGI")
 
-    // Stock router certificates can be self-signed. This is intentionally scoped to
-    // the validated private IPv4 endpoint, matching the CLI's verify=False policy.
-    private val insecureTls = SSLContext.getInstance("TLS").apply {
-        init(null, arrayOf<TrustManager>(object : X509TrustManager {
-            override fun getAcceptedIssuers() = emptyArray<java.security.cert.X509Certificate>()
-            override fun checkClientTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) {}
-            override fun checkServerTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) {}
-        }), rng)
-    }.socketFactory
-
     fun call(method: String, params: JSONObject = JSONObject()): JSONObject {
         val connection = rpcUrl.openConnection() as HttpsURLConnection
-        connection.sslSocketFactory = insecureTls
-        connection.hostnameVerifier = HostnameVerifier { _, _ -> true }
+        connection.sslSocketFactory = RouterTls.pinnedSocketFactory(host, certificatePin)
+        connection.hostnameVerifier = RouterTls.pinnedHostnameVerifier(host, certificatePin)
+        connection.instanceFollowRedirects = false
         connection.requestMethod = "POST"
         connection.doOutput = true
         connection.connectTimeout = 15_000
@@ -166,12 +165,15 @@ internal class RouterApi(private val baseUrl: String) : Closeable {
             throw RouterFailure("Finish the router setup wizard in the browser before using this app.")
         }
         if (!isOk(post)) throw RouterFailure("Router postLogin failed: ${post.optString("code")}")
-        val flags = results.optJSONObject("deviceFlags") ?: JSONObject()
-        return RouterDevice(
-            flags.optString("DEVICE_MODEL", "unknown"),
-            flags.optString("DEVICE_SYSTEM_NAME", "?"),
-            flags.optString("BOARD_NAME", "?")
-        )
+        val loginFlags = results.optJSONObject("deviceFlags")?.stringMap() ?: emptyMap()
+        val postLoginFlags = post.optJSONObject("results")?.optJSONObject("deviceFlags")?.stringMap()
+        return routerDeviceFromFlags(loginFlags, postLoginFlags)
+    }
+
+    private fun JSONObject.stringMap(): Map<String, String> = buildMap {
+        put("DEVICE_MODEL", optString("DEVICE_MODEL", "unknown"))
+        put("DEVICE_SYSTEM_NAME", optString("DEVICE_SYSTEM_NAME", "?"))
+        put("BOARD_NAME", optString("BOARD_NAME", "?"))
     }
 
     fun firmware(): String {

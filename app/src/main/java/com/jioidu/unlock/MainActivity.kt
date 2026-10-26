@@ -12,7 +12,10 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.ProgressBar
 import android.widget.TextView
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : Activity() {
     private val worker = Executors.newSingleThreadExecutor()
@@ -128,7 +131,8 @@ class MainActivity : Activity() {
         worker.execute {
             try {
                 val engine = RouterEngine(applicationContext)
-                val result = engine.run(action, url, password, destination) { line ->
+                val result = engine.run(action, url, password, destination,
+                    confirmCertificate = ::confirmCertificate) { line ->
                     mainHandler.post { appendLog(sanitize(line, password)) }
                 }
                 mainHandler.post {
@@ -152,9 +156,35 @@ class MainActivity : Activity() {
                 val safeMessage = sanitize(problem.message ?: problem.javaClass.simpleName, password)
                 mainHandler.post {
                     appendLog("Error: $safeMessage")
+                    adminPassword.text?.clear()
                     setBusy(false, "${action.name.lowercase().replaceFirstChar { it.uppercase() }} failed")
                 }
             }
+        }
+    }
+
+    /** Pause the worker until the user verifies the first certificate out of band. */
+    private fun confirmCertificate(host: String, fingerprint: String): Boolean {
+        val answer = AtomicBoolean(false)
+        val latch = CountDownLatch(1)
+        mainHandler.post {
+            AlertDialog.Builder(this)
+                .setTitle("Verify router certificate")
+                .setMessage(
+                    "Router: $host\n\nSHA-256:\n$fingerprint\n\n" +
+                        "Compare this fingerprint with a trusted source independent of this network. " +
+                        "The app sends no password until you confirm. A mismatch can expose your router credentials."
+                )
+                .setNegativeButton("Cancel") { _, _ -> latch.countDown() }
+                .setPositiveButton("I verified it") { _, _ -> answer.set(true); latch.countDown() }
+                .setOnCancelListener { latch.countDown() }
+                .show()
+        }
+        return try {
+            latch.await(5, TimeUnit.MINUTES) && answer.get()
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            false
         }
     }
 

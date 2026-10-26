@@ -74,6 +74,8 @@ internal class RouterSsh(
         s.setConfig("server_host_key", "ssh-rsa,ecdsa-sha2-nistp256,ssh-ed25519")
         s.setConfig("PubkeyAcceptedAlgorithms", "rsa-sha2-512,rsa-sha2-256,ssh-rsa")
         s.setConfig("kex", "curve25519-sha256,ecdh-sha2-nistp256,diffie-hellman-group14-sha256,diffie-hellman-group14-sha1,diffie-hellman-group1-sha1")
+        s.setServerAliveInterval(10_000)
+        s.setServerAliveCountMax(3)
         s.connect(10_000)
         return s
     }

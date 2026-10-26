@@ -36,6 +36,13 @@ Unlock guidance displays desktop utility instructions only. It does not run an
 unlock backend or change router settings, and it does not require the router
 URL or admin password.
 
+Before the first authenticated router request, the app displays the router
+certificate's SHA-256 fingerprint. Verify it through a trusted source
+independent of the current network before confirming. The app pins the
+certificate per router and blocks password transmission if the certificate
+changes. To accept a legitimate replacement certificate, clear the app's data
+only after independently verifying the new fingerprint.
+
 Backup requires root SSH to be enabled already. After confirmation, choose a
 destination with Android's system folder picker. The app uses the Storage Access
 Framework to write there. It creates an app-private RSA key for SSH; the key is

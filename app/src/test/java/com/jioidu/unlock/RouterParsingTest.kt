@@ -32,6 +32,22 @@ class RouterParsingTest {
         }
     }
 
+    @Test fun certificatePinsAreScopedToRouterPort() {
+        assertEquals("192.168.31.1:443", RouterTls.pinKey("https://192.168.31.1"))
+        assertEquals("192.168.31.1:8443", RouterTls.pinKey("https://192.168.31.1:8443"))
+    }
+
+    @Test fun duplicateAdminLoginUsesDeviceFlagsFromPostLogin() {
+        val device = routerDeviceFromFlags(
+            emptyMap(),
+            mapOf("DEVICE_MODEL" to "JIDU6611", "DEVICE_SYSTEM_NAME" to "Jio", "BOARD_NAME" to "board")
+        )
+        assertEquals("JIDU6611", device.model)
+        assertEquals("qualcomm", device.family)
+        assertEquals("Jio", device.vendor)
+        assertEquals("board", device.board)
+    }
+
     @Test fun flashPartitionsAreParsedWithSizes() {
         val parsed = partitions("""
             dev:    size   erasesize  name
