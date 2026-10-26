@@ -29,6 +29,8 @@ class MainActivity : Activity() {
     private var busy = false
     private var pendingBackupConfirmation = false
     private var backupTree: Uri? = null
+    @Volatile private var pendingCertificateLatch: CountDownLatch? = null
+    private var certificateDialog: AlertDialog? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -167,8 +169,13 @@ class MainActivity : Activity() {
     private fun confirmCertificate(host: String, fingerprint: String): Boolean {
         val answer = AtomicBoolean(false)
         val latch = CountDownLatch(1)
+        pendingCertificateLatch = latch
         mainHandler.post {
-            AlertDialog.Builder(this)
+            if (isFinishing || isDestroyed) {
+                latch.countDown()
+                return@post
+            }
+            certificateDialog = AlertDialog.Builder(this)
                 .setTitle("Verify router certificate")
                 .setMessage(
                     "Router: $host\n\nSHA-256:\n$fingerprint\n\n" +
@@ -178,14 +185,20 @@ class MainActivity : Activity() {
                 .setNegativeButton("Cancel") { _, _ -> latch.countDown() }
                 .setPositiveButton("I verified it") { _, _ -> answer.set(true); latch.countDown() }
                 .setOnCancelListener { latch.countDown() }
+                .setOnDismissListener {
+                    latch.countDown()
+                    certificateDialog = null
+                }
                 .show()
         }
-        return try {
+        val verified = try {
             latch.await(5, TimeUnit.MINUTES) && answer.get()
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
             false
         }
+        if (pendingCertificateLatch === latch) pendingCertificateLatch = null
+        return verified
     }
 
     private fun setBusy(value: Boolean, message: String) {
@@ -217,6 +230,10 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        certificateDialog?.dismiss()
+        certificateDialog = null
+        pendingCertificateLatch?.countDown()
+        pendingCertificateLatch = null
         super.onDestroy()
         // Do not interrupt an in-flight router operation during Activity teardown.
         worker.shutdown()
