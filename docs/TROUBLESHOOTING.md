@@ -126,9 +126,9 @@ listener. Run PowerShell as Administrator and retry.
 <details>
 <summary><strong>WSL: the callback address starts with 172.</strong></summary>
 
-WSL2's default NAT puts the Linux distribution on a private `172.x` network that
-the router cannot dial. Running as root inside WSL fixes the port-80 permission
-but not the route.
+WSL2's default NAT puts the Linux distribution on a private `172.16.0.0/12`
+network (`172.16`–`172.31`) that the router cannot dial. Running as root inside
+WSL fixes the port-80 permission but not the route.
 
 Use `.\flash.ps1` natively on Windows (recommended), or Git Bash with the Windows
 Python. If you need WSL, enable mirrored networking in

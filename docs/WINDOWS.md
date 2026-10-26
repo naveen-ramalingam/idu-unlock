@@ -108,9 +108,9 @@ route), pass the correct one:
 **Git Bash** runs the Windows Python, so `flash.sh` works there normally.
 
 **WSL2** is different. Its default NAT puts the distribution on a private
-`172.x` network, while the router is on the Windows LAN. The router cannot dial
-into the VM, so `unlock` binds port 80 and then waits for a callback that can
-never arrive. Running as root inside WSL does not fix the route. Use
+`172.16.0.0/12` network (`172.16`–`172.31`), while the router is on the Windows
+LAN. The router cannot dial into the VM, so `unlock` binds port 80 and then waits
+for a callback that can never arrive. Running as root inside WSL does not fix the route. Use
 `flash.ps1` natively for `unlock` and `backup`. `detect` and `check` are fine in
 WSL because they only make outbound requests.
 
