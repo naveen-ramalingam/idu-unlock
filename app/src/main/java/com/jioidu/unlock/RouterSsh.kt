@@ -52,6 +52,7 @@ internal class RouterSsh(
     private val verifyHostKey: (String) -> Boolean
 ) : Closeable {
     private var session: Session? = null
+    @Volatile private var hostKeyRejected = false
 
     fun connect() {
         key.publicKey()
@@ -61,13 +62,26 @@ internal class RouterSsh(
         // Prefer the app key. Some existing desktop unlocks allow an empty root
         // password, so fall back to that if the key is not authorized on the router.
         session = try { open(jsch, "publickey,password") }
-        catch (_: Exception) {
+        catch (firstFailure: Exception) {
+            if (isHostKeyFailure(firstFailure)) {
+                throw RouterFailure("SSH host key was not accepted or has changed. Backup stopped.")
+            }
             try { open(jsch, "password") }
-            catch (_: Exception) {
+            catch (secondFailure: Exception) {
+                if (isHostKeyFailure(secondFailure)) {
+                    throw RouterFailure("SSH host key was not accepted or has changed. Backup stopped.")
+                }
                 throw RouterFailure("Could not authenticate root SSH. Enable SSH using the desktop utility, then reconnect to the router Wi-Fi.")
             }
         }
     }
+
+    private fun isHostKeyFailure(failure: Exception): Boolean =
+        hostKeyRejected || failure.message.orEmpty().let {
+            it.contains("hostkey has been changed", ignoreCase = true) ||
+                it.contains("host key has been changed", ignoreCase = true) ||
+                it.contains("remote host identification has changed", ignoreCase = true)
+        }
 
     private fun open(jsch: JSch, auth: String): Session {
         val s = jsch.getSession("root", host, 22)
@@ -78,9 +92,15 @@ internal class RouterSsh(
             override fun getPassphrase(): String? = null
             override fun promptPassword(message: String) = false
             override fun promptPassphrase(message: String) = false
-            override fun promptYesNo(message: String): Boolean =
-                !message.contains("changed", ignoreCase = true) && verifyHostKey(message)
-            override fun showMessage(message: String) = Unit
+            override fun promptYesNo(message: String): Boolean {
+                val accepted = !message.contains("changed", ignoreCase = true) && verifyHostKey(message)
+                if (!accepted) hostKeyRejected = true
+                return accepted
+            }
+            override fun showMessage(message: String) {
+                if (message.contains("host key", ignoreCase = true) &&
+                    message.contains("changed", ignoreCase = true)) hostKeyRejected = true
+            }
         }
         s.setConfig("PreferredAuthentications", auth)
         // Vendor Dropbear uses legacy RSA negotiation, often with a regenerated
