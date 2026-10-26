@@ -33,8 +33,8 @@ If you are looking for a network unlock, this is not that tool.
 
 | Family | Models | Unlock | Backup |
 | --- | --- | --- | --- |
-| MediaTek `6j01` | JIDU 6101 / 6201 / 6401 / 6601 / 6701 | Yes | Yes |
-| Qualcomm `6j11` | JIDU 6111 / 6411 / 6611 / 6811 / 6911 | Yes | Yes |
+| MediaTek `6j01` | JIDU 6101 / 6201 / 6401 / 6601 / 6701 | Yes | After unlock |
+| Qualcomm `6j11` | JIDU 6111 / 6411 / 6611 / 6811 / 6911 | Yes | After unlock |
 
 Each model has its own flashing page, with the exact files and notes for that
 unit: [JIDU model guides](docs/models/README.md). The 6j01 pages lead with
@@ -52,16 +52,35 @@ On Windows, use `.\flash.ps1 detect`.
 ## Firmware matters
 
 The tool uses one method: the `changeUserPassword` handler in the router's own
-web API. Jio has fixed that handler on some newer builds, so what decides
-whether `unlock` works is the firmware your unit runs, not just the model.
+web API. Two things decide whether it works: the handler must still hash the
+password through a shell (that is where `$(...)` runs), and the password-history
+feature must exist at all. Very old builds have neither, and newer builds have
+replaced the shell-out, so the vulnerable window is a range — not "everything
+older than X".
 
-- **`6j01` (MediaTek), `R3.2.0` and earlier:** works. A `R3.2.0` unit confirmed it in the field.
-- **`6j01`, `R3.2.1` and newer:** uncertain. The handler is fixed by `R3.2.3` (read out of a stock rootfs), so `unlock` cannot work once that fix is present. Which release between `R3.2.1` and `R3.2.3` carries it is not known.
-- **`6j11` (Qualcomm), `R3.2.6` and earlier:** works. A community member confirmed the injection on a `6j11` unit running `R3.2.6`, the newest build it is known to survive. The MediaTek fix above had not shipped on the Qualcomm branch as of that release.
-- **Anything newer:** reported as `TEST`. Run `unlock` and see.
+| Family | Firmware | `check` | Why |
+| --- | --- | :---: | --- |
+| `6j01` MediaTek | `R2.0.18.x` and older | `NO` | no password-history shell-out; a stock 18.2 rootfs was checked |
+| `6j01` | `R2.0.19.0`–`R2.0.19.5` | `TEST` | the history feature landed somewhere in this window |
+| `6j01` | `R2.0.19.6`–`R3.2.0` | `YES` | the 19.6 rootfs carries the vulnerable hash; a 3.2.0 unit confirmed it |
+| `6j01` | `R3.2.1`–`R3.2.2` | `TEST` | the fix is somewhere between 3.2.0 and 3.2.3 |
+| `6j01` | `R3.2.3` and newer | `NO` | `luci.sys.user.setpasswd` replaced the shell-out |
+| `6j11` Qualcomm | `R3.2.6` and earlier | `YES` | member-confirmed at 3.2.6; older builds may predate the history feature, so the runtime probe decides |
+| `6j11` | `R3.2.7` and newer | `TEST` | no datapoint beyond 3.2.6 |
 
-`check` gives you the same verdict without touching anything. `detect` and
-`backup` keep working even where `unlock` no longer can.
+`check` is a version hint, not a promise. Before it sends a payload, `unlock`
+changes the guest account's password once to a random value and looks for a new
+password-history entry. On the builds examined, a build that does not record
+history also has no vulnerable hash, so the tool stops with an explanation
+instead of waiting for a callback. The probe only touches the guest account —
+its password becomes a random value — and never the admin account. `--force`
+skips the version-based refusal if you want to try a hybrid build anyway; the
+runtime probe still runs, but warns instead of stopping when no history appears.
+
+`detect` is always read-only. `backup` needs root SSH. On a locked unit where
+`unlock` cannot work, there is no supported software-only backup; the UART/u-boot
+route is the fallback. If SSH is already enabled (for example through UART),
+`unlock` detects it and `backup` proceeds without the exploit.
 
 More detail: [docs/INTERNALS.md](docs/INTERNALS.md#firmware-compatibility).
 
@@ -78,6 +97,15 @@ chmod +x flash.sh idu.py
 ./flash.sh backup    # unlock if needed, then back everything up
 ```
 
+On Linux, `unlock` and `backup` listen on port 80, which is privileged. If the
+tool reports *permission denied*, either run the command with `sudo`, or allow
+unprivileged low ports for the current boot so the backup files stay yours:
+
+```bash
+sudo sysctl net.ipv4.ip_unprivileged_port_start=80
+./flash.sh backup
+```
+
 Windows:
 
 ```powershell
@@ -85,8 +113,14 @@ git clone https://github.com/wpfyorg/idu-unlock.git
 cd idu-unlock
 
 .\flash.ps1 check
-.\flash.ps1 backup
+ssh-keygen -t rsa -b 2048 -f $HOME\.ssh\idu_rsa
+.\flash.ps1 backup --key $HOME\.ssh\idu_rsa
 ```
+
+Windows has no `expect`, so pass a key to both `backup` and `unlock`: after the
+installer enables SSH, the tool verifies it with a scripted login. Without a key
+that check fails even when the unlock worked. Create the key once as shown, then
+reuse it.
 
 The launcher creates a local Python environment and installs its dependencies on
 first run. Windows specifics: [docs/WINDOWS.md](docs/WINDOWS.md).
@@ -115,17 +149,27 @@ Replace `./flash.sh` with `.\flash.ps1` on Windows.
 --key PATH         SSH key to install. Optional: with no key, root is left
                    passwordless and nothing of ours is installed on the router
 
+--address IP       Local IPv4 the router should fetch the installer from.
+                   Use it when the automatic choice is wrong (VPN, multiple
+                   interfaces, or WSL's NAT)
+
+--force            Send the payloads even when check reports NO. Advanced;
+                   the runtime history probe still runs
+
 -v, --verbose      Show the detail behind each step
 ```
 
 No key is ever generated for you. If you pass `--key`, it must already exist. In
-PowerShell, single-dash forms (`-Router`, `-Password`, `-Key`) also work.
+PowerShell, single-dash forms (`-Router`, `-Password`, `-Key`, `-Address`,
+`-Force`) also work.
 
 ## Unlocking
 
 ```bash
 ./flash.sh unlock
 ```
+
+On Linux, add `sudo` if port 80 is refused: `sudo ./flash.sh unlock`.
 
 Typical output, with a key passed as `--key ~/.ssh/idu_rsa`:
 
@@ -137,6 +181,10 @@ Router admin password:
 [+] Family: mediatek
 
 [*] Unlocking...
+[*] Callback: http://192.168.31.51:80/ (the router fetches the installer here)
+    targeting guest record 3
+    probing for password-history support ...
+    password-history shell-out present
     Method 1/1: success
 
 [+] Root SSH enabled
@@ -207,6 +255,10 @@ AirFiber-XXXXXX/
     └── ...
 ```
 
+If `check` reports `NO` on a locked unit, there is no supported software-only
+backup: reading the flash needs root SSH, and this tool has no other network
+route. See [Firmware matters](#firmware-matters).
+
 > [!IMPORTANT]
 > Treat the backup directory like a password or a private key. It holds the
 > factory passwords, the Wi-Fi PSK, the serial number and every partition.
@@ -261,7 +313,10 @@ Yes. This is not a password recovery tool. If you do not have it, reset the unit
 and finish the setup wizard in its web interface; the wizard sets a new one.
 
 **Do I need to open the router or use a serial cable?**
-No. Everything runs over the network, against the router's own web API.
+No, as long as the firmware is in the vulnerable range. Everything runs over the
+network, against the router's own web API. On a build where that handler is
+fixed, this tool's network route is closed and the UART/u-boot console is its
+fallback.
 
 **Does it survive a reboot?**
 Yes. The unlock installs a startup script ordered after the vendor's, so SSH
@@ -289,6 +344,10 @@ Your computer needs:
 - **Python 3**. macOS: `xcode-select --install`. Linux: your package manager.
   Windows: `winget install Python.Python.3.12` (tick *Add python.exe to PATH*).
 - An **SSH client**, and network access to the router.
+- **Port 80, free and reachable.** `unlock` serves the installer there and the
+  router fetches it. On Linux, binding it needs root or a lowered privileged-port
+  floor (see [Quick start](#quick-start)). On Windows, allow Python through the
+  firewall. WSL2's default NAT cannot receive the callback; use `flash.ps1`.
 - **Linux only:** `expect` (`sudo apt install expect`). macOS includes it. It is
   what drives password-based SSH; without it, pass `--key`.
 

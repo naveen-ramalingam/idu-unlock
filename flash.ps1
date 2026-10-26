@@ -14,6 +14,8 @@ Options:
   --password P    router admin password (prompted if omitted)
   --key PATH      SSH key. Optional: with no key root is left passwordless and
                   nothing of ours is installed on the router
+  --address IP    local address the router should call back on (VPN/WSL)
+  --force         send the payloads even when check says NO (advanced)
   -v, --verbose   show the per-command detail behind each method
 
 The router must be SET UP, not factory-fresh: a reset IDU keeps its API locked
@@ -22,7 +24,8 @@ until the setup wizard is completed in the web UI. Reset it, finish the wizard
 
 The router fetches the installer by calling back to this PC on port 80, so
 Windows Firewall must let python.exe through on your private network — see the
-"On Windows" section of the README.
+"On Windows" section of the README. If Windows refuses the port, run PowerShell
+as Administrator.
 
 Only run against equipment you own or are explicitly authorised to test.
 Provided as is, without warranty, without liability — see the README.
@@ -56,6 +59,8 @@ Options:
   --password P    router admin password (prompted if omitted)
   --key PATH      SSH key. Optional: with no key root is left passwordless and
                   nothing of ours is installed on the router
+  --address IP    local address the router should call back on (VPN/WSL)
+  --force         send the payloads even when check says NO (advanced)
   -v, --verbose   show the per-command detail behind each method
 '@
 }
@@ -65,6 +70,8 @@ $Command  = ''
 $Router   = if ($env:ROUTER)   { $env:ROUTER }   else { 'https://192.168.31.1' }
 $Password = if ($env:PASSWORD) { $env:PASSWORD } else { '' }
 $Key      = if ($env:KEY)      { $env:KEY }      else { '' }
+$Address  = if ($env:ADDRESS)  { $env:ADDRESS }  else { '' }
+$Force    = $false
 $ShowVerbose = $false
 $NoBanner    = $false
 
@@ -88,6 +95,11 @@ while ($index -lt $args.Count) {
     if ($index + 1 -ge $args.Count) { Bad "missing value for $token"; exit 2 }
     $index++; $Key = [string]$args[$index]
   }
+  elseif ($token -in @('--address', '-address')) {
+    if ($index + 1 -ge $args.Count) { Bad "missing value for $token"; exit 2 }
+    $index++; $Address = [string]$args[$index]
+  }
+  elseif ($token -in @('--force', '-force')) { $Force = $true }
   elseif ($token -in @('-v', '--verbose', '-verbose')) { $ShowVerbose = $true }
   elseif ($token -in @('unlock', 'backup', 'detect', 'check')) {
     $Command = $token
@@ -216,9 +228,15 @@ function Invoke-Id {
   $callArgs += (Join-Path $Here 'idu.py')
   $callArgs += @('--router', $Router, '--password', $Password)
   if ($Key) { $callArgs += @('--key', $Key) }
+  if ($Address) { $callArgs += @('--address', $Address) }
   if ($ShowVerbose) { $callArgs += '--verbose' }
   if ($NoBanner) { $callArgs += '--no-banner' }
   $callArgs += $IdArgs
+  # --force belongs to the unlock subcommand, so it goes after the command name.
+  # backup's inner `Invoke-Id @('unlock')` still gets it.
+  if ($Force -and $IdArgs.Count -gt 0 -and $IdArgs[0] -eq 'unlock') {
+    $callArgs += '--force'
+  }
   # straight to the host, so the caller captures only the exit code
   & $PyExe @callArgs | Out-Host
   return $LASTEXITCODE
@@ -232,6 +250,7 @@ function Confirm-Device {
   $callArgs += (Join-Path $Here 'idu.py')
   $callArgs += @('--router', $Router, '--password', $Password)
   if ($Key) { $callArgs += @('--key', $Key) }
+  if ($Address) { $callArgs += @('--address', $Address) }
   if ($ShowVerbose) { $callArgs += '--verbose' }
   $callArgs += @('detect')
   # Captured rather than Tee'd so the MODEL=/FAMILY= machine lines can be dropped

