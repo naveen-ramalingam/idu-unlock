@@ -57,7 +57,11 @@ internal class RouterSsh(
     fun connect() {
         key.publicKey()
         val jsch = JSch()
-        jsch.setKnownHosts(key.knownHostsPath())
+        val knownHosts = File(key.knownHostsPath())
+        if (!knownHosts.exists() && !knownHosts.createNewFile()) {
+            throw RouterFailure("Could not create the app-private SSH host-key store.")
+        }
+        jsch.setKnownHosts(knownHosts.absolutePath)
         jsch.addIdentity(key.keyPath())
         // Prefer the app key. Some existing desktop unlocks allow an empty root
         // password, so fall back to that if the key is not authorized on the router.

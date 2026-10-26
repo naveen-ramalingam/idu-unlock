@@ -205,9 +205,12 @@ class MainActivity : Activity() {
                 .show()
         }
         val verified = try {
-            latch.await(5, TimeUnit.MINUTES) && answer.get()
+            val completed = latch.await(5, TimeUnit.MINUTES)
+            if (!completed) mainHandler.post { certificateDialog?.dismiss() }
+            completed && answer.get()
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
+            mainHandler.post { certificateDialog?.dismiss() }
             false
         }
         if (pendingCertificateLatch === latch) pendingCertificateLatch = null
