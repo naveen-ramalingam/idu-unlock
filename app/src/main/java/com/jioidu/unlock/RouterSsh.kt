@@ -154,9 +154,19 @@ internal class RouterSsh(
         try {
             channel.connect(10_000)
             val buffer = ByteArray(64 * 1024)
+            var readDeadline = System.currentTimeMillis() + SSH_IDLE_TIMEOUT_MS
             while (true) {
+                if (input.available() == 0) {
+                    if (channel.isClosed) break
+                    if (System.currentTimeMillis() >= readDeadline) {
+                        throw RouterFailure("SSH command stalled while waiting for router data.")
+                    }
+                    Thread.sleep(SSH_POLL_INTERVAL_MS)
+                    continue
+                }
                 val count = input.read(buffer)
                 if (count < 0) break
+                readDeadline = System.currentTimeMillis() + SSH_IDLE_TIMEOUT_MS
                 received += count
                 if (received > byteLimit) throw RouterFailure("Router returned more data than expected; stopped download.")
                 target.write(buffer, 0, count)
@@ -183,5 +193,10 @@ internal class RouterSsh(
     override fun close() {
         session?.disconnect()
         session = null
+    }
+
+    private companion object {
+        const val SSH_IDLE_TIMEOUT_MS = 30_000L
+        const val SSH_POLL_INTERVAL_MS = 50L
     }
 }

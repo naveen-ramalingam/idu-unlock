@@ -1,7 +1,14 @@
 package com.jioidu.unlock
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.Uri
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 enum class RouterAction { DETECT, CHECK, UNLOCK, BACKUP }
 data class RouterResult(val summary: String, val details: String = "")
@@ -26,6 +33,23 @@ class RouterEngine(private val context: Context) {
             )
         }
 
+        return withRouterWifi {
+            runOnRouterWifi(
+                action, routerUrl, adminPassword, backupTree,
+                confirmCertificate, confirmSshHostKey, log
+            )
+        }
+    }
+
+    private fun runOnRouterWifi(
+        action: RouterAction,
+        routerUrl: String,
+        adminPassword: String,
+        backupTree: Uri?,
+        confirmCertificate: (host: String, fingerprint: String) -> Boolean,
+        confirmSshHostKey: (message: String) -> Boolean,
+        log: (String) -> Unit
+    ): RouterResult {
         val host = privateRouterAddress(routerUrl)
         if (adminPassword.isBlank()) throw RouterFailure("Enter the router admin password.")
 
@@ -72,6 +96,49 @@ class RouterEngine(private val context: Context) {
 
                 RouterAction.UNLOCK -> throw IllegalStateException("Handled above")
             }
+        }
+    }
+
+    private fun <T> withRouterWifi(operation: () -> T): T {
+        val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val wifi = connectedWifiNetwork(connectivity)
+        val previouslyBound = connectivity.boundNetworkForProcess
+        if (previouslyBound != wifi && !connectivity.bindProcessToNetwork(wifi)) {
+            throw RouterFailure("Could not bind router traffic to Wi-Fi.")
+        }
+        return try {
+            operation()
+        } finally {
+            if (previouslyBound != wifi) connectivity.bindProcessToNetwork(previouslyBound)
+        }
+    }
+
+    private fun connectedWifiNetwork(connectivity: ConnectivityManager): Network {
+        val network = AtomicReference<Network?>()
+        val available = CountDownLatch(1)
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(candidate: Network) {
+                if (network.compareAndSet(null, candidate)) available.countDown()
+            }
+        }
+        val request = NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            .build()
+        try {
+            connectivity.registerNetworkCallback(request, callback)
+        } catch (_: Exception) {
+            throw RouterFailure("Could not inspect Wi-Fi network state.")
+        }
+        try {
+            if (!available.await(10, TimeUnit.SECONDS)) {
+                throw RouterFailure("Connect to the router's Wi-Fi network before continuing.")
+            }
+            return network.get() ?: throw RouterFailure("No connected Wi-Fi network is available.")
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw RouterFailure("Interrupted while waiting for Wi-Fi.")
+        } finally {
+            connectivity.unregisterNetworkCallback(callback)
         }
     }
 }
