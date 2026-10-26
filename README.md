@@ -97,9 +97,15 @@ chmod +x flash.sh idu.py
 ./flash.sh backup    # unlock if needed, then back everything up
 ```
 
-On Linux, `unlock` and `backup` listen on port 80, which is privileged. If the
-tool reports *permission denied*, either run the command with `sudo`, or allow
-unprivileged low ports for the current boot so the backup files stay yours:
+On Linux and macOS, `unlock` and `backup` listen on port 80, which is privileged.
+If the tool reports *permission denied*, run the command with `sudo`:
+
+```bash
+sudo ./flash.sh backup
+```
+
+On Linux you can instead allow unprivileged low ports for the current boot, which
+keeps the backup files owned by you:
 
 ```bash
 sudo sysctl net.ipv4.ip_unprivileged_port_start=80
@@ -169,7 +175,7 @@ PowerShell, single-dash forms (`-Router`, `-Password`, `-Key`, `-Address`,
 ./flash.sh unlock
 ```
 
-On Linux, add `sudo` if port 80 is refused: `sudo ./flash.sh unlock`.
+On Linux or macOS, add `sudo` if port 80 is refused: `sudo ./flash.sh unlock`.
 
 Typical output, with a key passed as `--key ~/.ssh/idu_rsa`:
 
@@ -345,9 +351,10 @@ Your computer needs:
   Windows: `winget install Python.Python.3.12` (tick *Add python.exe to PATH*).
 - An **SSH client**, and network access to the router.
 - **Port 80, free and reachable.** `unlock` serves the installer there and the
-  router fetches it. On Linux, binding it needs root or a lowered privileged-port
-  floor (see [Quick start](#quick-start)). On Windows, allow Python through the
-  firewall. WSL2's default NAT cannot receive the callback; use `flash.ps1`.
+  router fetches it. On Linux and macOS, binding it needs root; Linux can
+  instead lower the privileged-port floor (see [Quick start](#quick-start)). On
+  Windows, allow Python through the firewall. WSL2's default NAT cannot receive
+  the callback; use `flash.ps1`.
 - **Linux only:** `expect` (`sudo apt install expect`). macOS includes it. It is
   what drives password-based SSH; without it, pass `--key`.
 

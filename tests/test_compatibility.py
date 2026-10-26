@@ -342,6 +342,14 @@ class PortErrorTests(unittest.TestCase):
         self.assertIn("WSL2", message)
         self.assertIn("flash.ps1", message)
 
+    def test_macos_permission_error_does_not_offer_the_linux_sysctl(self):
+        problem = PermissionError(errno.EACCES, "Permission denied")
+        with (mock.patch.object(idu.sys, "platform", "darwin"),
+              mock.patch.object(idu, "_running_in_wsl", return_value=False)):
+            message = str(idu._port_error(80, problem))
+        self.assertIn("sudo", message)
+        self.assertNotIn("ip_unprivileged_port_start", message)
+
 
 if __name__ == "__main__":
     unittest.main()

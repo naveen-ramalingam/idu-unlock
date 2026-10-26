@@ -21,9 +21,10 @@
 # until the setup wizard is completed in the web UI. Reset it, finish the wizard
 # (which sets the admin password), then run this and supply that password.
 #
-# On Linux, unlock/backup listen for the router on port 80, which is privileged.
-# If binding fails, run those two with sudo, or allow unprivileged low ports for
-# this boot:  sudo sysctl net.ipv4.ip_unprivileged_port_start=80
+# On Linux and macOS, unlock/backup listen for the router on port 80, which is
+# privileged. If binding fails, run those two with sudo. On Linux you can instead
+# allow unprivileged low ports for this boot:
+#   sudo sysctl net.ipv4.ip_unprivileged_port_start=80
 # On Windows, use .\flash.ps1 instead: WSL2's default NAT cannot receive the
 # router's callback.
 #
