@@ -144,7 +144,7 @@ class MainActivity : Activity() {
                     adminPassword.text?.clear()
                     setBusy(false, if (guidanceOnly) "Unlock guidance ready" else
                         result.summary.ifBlank { "${action.name.lowercase()} complete" })
-                    if (guidanceOnly) {
+                    if (guidanceOnly && !isFinishing && !isDestroyed) {
                         val instructions = listOf(result.summary, result.details)
                             .filter { it.isNotBlank() }
                             .joinToString("\n\n")
