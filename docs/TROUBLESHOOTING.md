@@ -97,21 +97,21 @@ refusal; the probe still runs, but only warns.
 
 The callback server must own port 80. The error tells you which failure it is:
 
-- **Permission denied on Linux or WSL:** port 80 is privileged, so binding it
-  needs root. Re-run with `sudo`:
+- **Permission denied on Linux, macOS, or WSL:** port 80 is privileged, so
+  binding it needs root. Re-run with `sudo`:
 
   ```bash
   sudo ./flash.sh unlock
   ```
 
-  Or allow unprivileged low ports for the current boot, which keeps the backup
-  files owned by you:
+  On Linux, you can instead allow unprivileged low ports for the current boot,
+  which keeps the backup files owned by you:
 
   ```bash
   sudo sysctl net.ipv4.ip_unprivileged_port_start=80
   ```
 
-  macOS does not reserve low ports, so it does not need either step.
+  That sysctl is Linux-only; on macOS, use `sudo`.
 
 - **Address already in use:** something else holds port 80. Find it with
   `sudo lsof -nP -iTCP:80 -sTCP:LISTEN` on macOS/Linux, or

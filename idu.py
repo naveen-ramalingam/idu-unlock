@@ -410,11 +410,18 @@ def _port_error(port: int, problem: OSError) -> IduError:
 
     if denied:
         hint = (
-            "    Port 80 is privileged on Linux, so binding it needs root.\n"
+            "    Port 80 is privileged, so binding it needs root.\n"
             "    Re-run the command with sudo, for example:\n"
-            "      sudo ./flash.sh unlock\n"
-            "    Or allow unprivileged low ports until the next reboot:\n"
-            "      sudo sysctl net.ipv4.ip_unprivileged_port_start=80")
+            "      sudo ./flash.sh unlock")
+        if sys.platform == "darwin":
+            hint += (
+                "\n    macOS has no unprivileged low-port setting; sudo is the\n"
+                "    supported way to bind port 80. (The Linux sysctl does not\n"
+                "    exist on macOS.)")
+        else:
+            hint += (
+                "\n    Or allow unprivileged low ports until the next reboot:\n"
+                "      sudo sysctl net.ipv4.ip_unprivileged_port_start=80")
         if _running_in_wsl():
             hint += (
                 "\n    WSL2's default NAT also stops the router reaching the VM. If the\n"
