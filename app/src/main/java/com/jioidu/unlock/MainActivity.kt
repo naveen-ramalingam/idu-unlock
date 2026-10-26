@@ -134,7 +134,8 @@ class MainActivity : Activity() {
             try {
                 val engine = RouterEngine(applicationContext)
                 val result = engine.run(action, url, password, destination,
-                    confirmCertificate = ::confirmCertificate) { line ->
+                    confirmCertificate = ::confirmCertificate,
+                    confirmSshHostKey = ::confirmSshHostKey) { line ->
                     mainHandler.post { appendLog(sanitize(line, password)) }
                 }
                 mainHandler.post {
@@ -167,6 +168,22 @@ class MainActivity : Activity() {
 
     /** Pause the worker until the user verifies the first certificate out of band. */
     private fun confirmCertificate(host: String, fingerprint: String): Boolean {
+        return confirmIdentity(
+            "Verify router certificate",
+            "Router: $host\n\nSHA-256:\n$fingerprint\n\n" +
+                "Compare this fingerprint with a trusted source independent of this network. " +
+                "The app sends no password until you confirm. A mismatch can expose your router credentials."
+        )
+    }
+
+    private fun confirmSshHostKey(message: String): Boolean =
+        confirmIdentity(
+            "Verify SSH host key",
+            "$message\n\nCompare the fingerprint with a trusted source independent of this network. " +
+                "Backup stops if the SSH host key changes."
+        )
+
+    private fun confirmIdentity(title: String, message: String): Boolean {
         val answer = AtomicBoolean(false)
         val latch = CountDownLatch(1)
         pendingCertificateLatch = latch
@@ -176,12 +193,8 @@ class MainActivity : Activity() {
                 return@post
             }
             certificateDialog = AlertDialog.Builder(this)
-                .setTitle("Verify router certificate")
-                .setMessage(
-                    "Router: $host\n\nSHA-256:\n$fingerprint\n\n" +
-                        "Compare this fingerprint with a trusted source independent of this network. " +
-                        "The app sends no password until you confirm. A mismatch can expose your router credentials."
-                )
+                .setTitle(title)
+                .setMessage(message)
                 .setNegativeButton("Cancel") { _, _ -> latch.countDown() }
                 .setPositiveButton("I verified it") { _, _ -> answer.set(true); latch.countDown() }
                 .setOnCancelListener { latch.countDown() }

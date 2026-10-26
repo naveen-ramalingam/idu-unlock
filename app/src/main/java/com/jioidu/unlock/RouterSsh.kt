@@ -5,6 +5,7 @@ import com.jcraft.jsch.ChannelExec
 import com.jcraft.jsch.JSch
 import com.jcraft.jsch.KeyPair
 import com.jcraft.jsch.Session
+import com.jcraft.jsch.UserInfo
 import java.io.ByteArrayOutputStream
 import java.io.Closeable
 import java.io.File
@@ -37,6 +38,8 @@ internal class RouterKey(private val context: Context) {
         publicKey()
         return keyFile.absolutePath
     }
+
+    fun knownHostsPath(): String = File(context.filesDir, "idu_known_hosts").absolutePath
 }
 
 /**
@@ -45,13 +48,15 @@ internal class RouterKey(private val context: Context) {
  */
 internal class RouterSsh(
     private val host: String,
-    private val key: RouterKey
+    private val key: RouterKey,
+    private val verifyHostKey: (String) -> Boolean
 ) : Closeable {
     private var session: Session? = null
 
     fun connect() {
         key.publicKey()
         val jsch = JSch()
+        jsch.setKnownHosts(key.knownHostsPath())
         jsch.addIdentity(key.keyPath())
         // Prefer the app key. Some existing desktop unlocks allow an empty root
         // password, so fall back to that if the key is not authorized on the router.
@@ -67,7 +72,16 @@ internal class RouterSsh(
     private fun open(jsch: JSch, auth: String): Session {
         val s = jsch.getSession("root", host, 22)
         s.setPassword("")
-        s.setConfig("StrictHostKeyChecking", "no")
+        s.setConfig("StrictHostKeyChecking", "ask")
+        s.userInfo = object : UserInfo {
+            override fun getPassword() = ""
+            override fun getPassphrase(): String? = null
+            override fun promptPassword(message: String) = false
+            override fun promptPassphrase(message: String) = false
+            override fun promptYesNo(message: String): Boolean =
+                !message.contains("changed", ignoreCase = true) && verifyHostKey(message)
+            override fun showMessage(message: String) = Unit
+        }
         s.setConfig("PreferredAuthentications", auth)
         // Vendor Dropbear uses legacy RSA negotiation, often with a regenerated
         // host key each reboot. Permit those algorithms for this LAN connection.

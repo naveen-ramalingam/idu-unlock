@@ -43,6 +43,10 @@ certificate per router and blocks password transmission if the certificate
 changes. To accept a legitimate replacement certificate, clear the app's data
 only after independently verifying the new fingerprint.
 
+Backup also verifies the SSH host key. On first connection, compare its
+fingerprint with an independent trusted source. Changed SSH host keys are
+rejected.
+
 Backup requires root SSH to be enabled already. After confirmation, choose a
 destination with Android's system folder picker. The app uses the Storage Access
 Framework to write there. It creates an app-private RSA key for SSH; the key is

@@ -14,6 +14,7 @@ class RouterEngine(private val context: Context) {
         adminPassword: String,
         backupTree: Uri?,
         confirmCertificate: (host: String, fingerprint: String) -> Boolean,
+        confirmSshHostKey: (message: String) -> Boolean,
         log: (String) -> Unit
     ): RouterResult {
         if (action == RouterAction.UNLOCK) {
@@ -59,7 +60,7 @@ class RouterEngine(private val context: Context) {
 
                 RouterAction.BACKUP -> {
                     if (backupTree == null) throw RouterFailure("Select a backup folder.")
-                    RouterSsh(host, RouterKey(context)).use { ssh ->
+                    RouterSsh(host, RouterKey(context), confirmSshHostKey).use { ssh ->
                         log("Connecting to previously enabled root SSH…")
                         ssh.connect()
                         log("SSH connected. Reading flash layout…")
