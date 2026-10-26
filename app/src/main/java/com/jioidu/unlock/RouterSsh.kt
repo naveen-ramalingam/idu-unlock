@@ -156,8 +156,9 @@ internal class RouterSsh(
             val buffer = ByteArray(64 * 1024)
             var readDeadline = System.currentTimeMillis() + SSH_IDLE_TIMEOUT_MS
             while (true) {
+                val closedBeforeCheck = channel.isClosed
                 if (input.available() == 0) {
-                    if (channel.isClosed) break
+                    if (closedBeforeCheck) break
                     if (System.currentTimeMillis() >= readDeadline) {
                         throw RouterFailure("SSH command stalled while waiting for router data.")
                     }
