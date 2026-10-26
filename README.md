@@ -77,9 +77,10 @@ its password becomes a random value — and never the admin account. `--force`
 skips the version-based refusal if you want to try a hybrid build anyway; the
 runtime probe still runs, but warns instead of stopping when no history appears.
 
-`detect` is always read-only. `backup` is **not** independent of `unlock`: it
-needs root SSH. On a locked unit where `unlock` cannot work, there is no
-supported software-only backup; the UART/u-boot route is the fallback.
+`detect` is always read-only. `backup` needs root SSH. On a locked unit where
+`unlock` cannot work, there is no supported software-only backup; the UART/u-boot
+route is the fallback. If SSH is already enabled (for example through UART),
+`unlock` detects it and `backup` proceeds without the exploit.
 
 More detail: [docs/INTERNALS.md](docs/INTERNALS.md#firmware-compatibility).
 
@@ -116,8 +117,10 @@ ssh-keygen -t rsa -b 2048 -f $HOME\.ssh\idu_rsa
 .\flash.ps1 backup --key $HOME\.ssh\idu_rsa
 ```
 
-Windows has no `expect`, so `backup` needs a key; `unlock` does not. Create the
-key once as shown, then reuse it.
+Windows has no `expect`, so pass a key to both `backup` and `unlock`: after the
+installer enables SSH, the tool verifies it with a scripted login. Without a key
+that check fails even when the unlock worked. Create the key once as shown, then
+reuse it.
 
 The launcher creates a local Python environment and installs its dependencies on
 first run. Windows specifics: [docs/WINDOWS.md](docs/WINDOWS.md).

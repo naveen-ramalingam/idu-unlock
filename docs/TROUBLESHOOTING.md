@@ -174,8 +174,12 @@ If it does not:
   not separating them.
 
 If the tool says the router **accepted the payloads but never fetched** the URL,
-the API ran but did not execute anything. On old firmware that is the
-password-history gap, not a firewall problem — see *`check` reports NO* above.
+that only means the callback did not arrive. It does not prove whether the shell
+evaluated them: an executed fetch can still fail on routing or firewall rules,
+so finish the reachability checks above. Separately, on a build where `check`
+reports `NO`, `unlock` stops before sending a payload unless `--force` was used;
+a forced run can accept payloads that cannot execute — see *`check` reports NO*
+above.
 
 </details>
 
@@ -248,11 +252,12 @@ you were the one who just replaced sshd on the device.
 <details>
 <summary><strong>Can I back up before unlocking?</strong></summary>
 
-No. The backup reads `/dev/mtd*` over SSH as root, and `flash.sh backup` runs
-`unlock` first for exactly that reason. On firmware where `unlock` cannot work,
-there is no software-only backup — the UART/u-boot console is the fallback. Do
-not install OpenWrt first and plan to back up afterwards; the stock image is gone
-by then.
+Not unless root SSH is already enabled, for example through UART. The backup
+reads `/dev/mtd*` over SSH as root, and `flash.sh backup` runs `unlock` first;
+`unlock` uses the existing SSH login if it finds one. On a locked unit where
+`unlock` cannot work, there is no software-only backup — the UART/u-boot console
+is the fallback. Do not install OpenWrt first and plan to back up afterwards; the
+stock image is gone by then.
 
 </details>
 

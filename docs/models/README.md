@@ -43,8 +43,9 @@ Whichever page you land on, back up before flashing. The backup is the only way
 back to stock, and it holds the factory data that the flash does not recreate,
 including `uboot_credentials.env` for the UART route.
 
-The backup needs root SSH, so it depends on `unlock` working. Run
-`./flash.sh check` first: if it reports `NO`, this tool has no software-only
+The backup needs root SSH: either a unit that is already unlocked (for example
+through UART), or a successful `unlock`. Run `./flash.sh check` first. If it
+reports `NO` and SSH is not already enabled, this tool has no software-only
 backup for that unit. The UART route on the model page is then the fallback, and
 you need it before flashing anything. See
 [Firmware matters](../../README.md#firmware-matters).

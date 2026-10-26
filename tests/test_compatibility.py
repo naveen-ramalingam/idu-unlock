@@ -205,13 +205,35 @@ class CompatibilityTests(unittest.TestCase):
 
 
 class UnlockGateTests(unittest.TestCase):
-    def test_method_closed_verdict_stops_before_touching_the_router(self):
-        verdict = idu.Verdict(
+    class Shell:
+        def __init__(self, alive):
+            self._alive = alive
+
+        def alive(self):
+            return self._alive
+
+    @staticmethod
+    def closed_verdict():
+        return idu.Verdict(
             model="JIDU6101", firmware="R2.0.18.2", vectors=[],
             evidence=["release < R2.0.19: no password-history shell-out"],
             method_closed=True)
-        with self.assertRaises(idu.UnsupportedFirmware):
-            idu.unlock(object(), None, "pw", verdict=verdict)
+
+    def test_method_closed_stops_when_no_shell_is_already_open(self):
+        api = mock.Mock(host="192.168.31.1")
+        with mock.patch.object(idu, "_shell_for", return_value=self.Shell(False)):
+            with self.assertRaises(idu.UnsupportedFirmware):
+                idu.unlock(api, None, "pw", verdict=self.closed_verdict(),
+                           hint=False)
+        api.session.assert_not_called()
+
+    def test_existing_root_shell_is_used_despite_closed_method(self):
+        # a UART-unlocked unit can still be backed up on NO firmware
+        api = mock.Mock(host="192.168.31.1")
+        with (mock.patch.object(idu, "_shell_for", return_value=self.Shell(True)),
+              contextlib.redirect_stdout(io.StringIO())):
+            idu.unlock(api, None, "pw", verdict=self.closed_verdict(), hint=False)
+        api.session.assert_not_called()
 
 
 class CallbackAddressTests(unittest.TestCase):

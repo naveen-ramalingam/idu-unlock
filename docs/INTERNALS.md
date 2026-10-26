@@ -225,10 +225,11 @@ callback is still the only evidence that a payload executed.
 ### What "NO" means in practice
 
 On a locked unit running `NO` firmware, the `changeUserPassword` route is closed.
-`detect` still works because it only reads the API, but `backup` needs root SSH
-from this tool, so it cannot run either. There is no supported software-only
-backup before unlock; the UART/u-boot console is the fallback. Do not flash
-anything until you have a backup made through that route.
+`detect` still works because it only reads the API. `backup` needs root SSH; it
+works if SSH was already enabled (for example through UART), because `unlock`
+checks for that before applying the firmware gate. Otherwise there is no
+supported software-only backup before unlock, and the UART/u-boot console is the
+fallback. Do not flash anything until you have a backup made through that route.
 
 `NO` is a statement about this handler, not an audit of the whole firmware.
 Other API handlers exist and are not tested or used here.

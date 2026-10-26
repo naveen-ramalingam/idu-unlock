@@ -65,7 +65,10 @@ ssh-keygen -t rsa -b 2048 -f $HOME\.ssh\idu_rsa
 
 Use RSA: the stock Dropbear on these units rejects Ed25519.
 
-`unlock` itself needs no key: it is pure web-API injection.
+On Windows, pass the key to `unlock` as well. The web-API injection itself needs
+no key, but the persistence check is a scripted SSH login: without a key,
+`unlock` can enable SSH and still report failure. Passing `--key` also installs
+the public key on the router.
 
 ## Firewall and port 80
 

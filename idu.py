@@ -911,6 +911,16 @@ def unlock(api: Api, key_path: str | None, password: str, port: int = 80,
     vector is authoritative. Nothing is generated here: with no --key the
     router is left with passwordless root and nothing of ours installed on it.
     """
+    # An already-unlocked unit needs no exploit. A unit set up through UART can
+    # still be backed up even when this firmware is outside the vulnerable
+    # window, and the wrappers run `unlock` before `backup`.
+    shell = _shell_for(key_path, api.host)
+    if shell.alive():
+        print("[+] Root SSH enabled")
+        if hint:
+            print(f"    {_ssh_hint(key_path, api.host)}")
+        return
+
     if verdict and verdict.method_closed and not force:
         detail = (verdict.evidence[0] if verdict.evidence
                   else "the changeUserPassword method is closed on this firmware")
@@ -931,13 +941,6 @@ def unlock(api: Api, key_path: str | None, password: str, port: int = 80,
                 "    to leave root passwordless instead.")
         with open(pub_path) as handle:
             pubkey = handle.read().strip()
-
-    shell = _shell_for(key_path, api.host)
-    if shell.alive():
-        print("[+] Root SSH enabled")
-        if hint:
-            print(f"    {_ssh_hint(key_path, api.host)}")
-        return
 
     address = callback_address(api.host, address_override)
     script = installer_script(address, pubkey)
