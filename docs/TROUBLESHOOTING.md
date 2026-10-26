@@ -225,9 +225,10 @@ The persistence step did not land. Check for the marker on the device:
 ssh root@192.168.31.1 'ls -l /etc/rc.d/S99idu-ssh'
 ```
 
-If it is missing, run `./flash.sh unlock` again (or `.\flash.ps1 unlock`) and watch
-for `[+] SSH persistence enabled` in the output — if that line says the
-persistence is *missing* instead, follow the by-hand recipe it prints.
+If it is missing, run `./flash.sh unlock` again (on Windows,
+`.\flash.ps1 unlock --key $HOME\.ssh\idu_rsa`) and watch for
+`[+] SSH persistence enabled` in the output. If that line says the persistence is
+*missing* instead, follow the by-hand recipe it prints.
 
 </details>
 

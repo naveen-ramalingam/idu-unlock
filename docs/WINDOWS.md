@@ -103,7 +103,7 @@ If that is not your LAN address (a VPN, Hyper-V or a second adapter can win the
 route), pass the correct one:
 
 ```powershell
-.\flash.ps1 --address 192.168.31.51 unlock
+.\flash.ps1 --address 192.168.31.51 --key $HOME\.ssh\idu_rsa unlock
 ```
 
 ## WSL and Git Bash
