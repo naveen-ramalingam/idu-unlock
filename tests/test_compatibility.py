@@ -1,6 +1,9 @@
 import contextlib
+import errno
 import io
+import os
 import unittest
+from unittest import mock
 
 import idu
 
@@ -139,37 +142,183 @@ class MfgLayoutTests(unittest.TestCase):
 
 
 class CompatibilityTests(unittest.TestCase):
-    def assert_release(self, version, test_required, model="JIDU6101"):
-        verdict = idu.check(FakeApi(version, model))
-        self.assertEqual(verdict.test_required, test_required)
-        self.assertEqual(verdict.unlockable, not test_required)
-        self.assertEqual(verdict.vectors, [idu.PasswordVector.name])
+    @staticmethod
+    def verdict_for(version, model="JIDU6101"):
+        return idu.check(FakeApi(version, model))
 
-    def test_r2_release_is_confirmed(self):
-        self.assert_release("JIO_JIDU6701_R2.0.19.5", False)
+    def assert_state(self, version, state, model="JIDU6101"):
+        verdict = self.verdict_for(version, model)
+        actual = ("NO" if verdict.method_closed
+                  else "TEST" if verdict.test_required else "YES")
+        self.assertEqual(actual, state, f"{version}: {verdict.evidence}")
+        self.assertEqual(verdict.unlockable, state == "YES")
+        if state == "NO":
+            self.assertEqual(verdict.vectors, [])
+        else:
+            self.assertEqual(verdict.vectors, [idu.PasswordVector.name])
+
+    def test_r2_0_18_is_method_closed(self):
+        # a stock R2.0.18.2 rootfs has no savePasswdHistory(): setPassword()
+        # wraps the password in single quotes, so $(...) is never evaluated
+        self.assert_state("ARCNJIO_JIDU6101_R2.0.18.2", "NO")
+        self.assert_state("SRCMJIO_JIDU6401_R2.0.9", "NO", model="JIDU6401")
+
+    def test_r2_0_19_window_requires_api_test(self):
+        # the password-history shell-out landed somewhere in this window
+        self.assert_state("JIO_JIDU6701_R2.0.19.0", "TEST", model="JIDU6701")
+        self.assert_state("JIO_JIDU6701_R2.0.19.5", "TEST", model="JIDU6701")
+
+    def test_r2_0_19_6_is_confirmed(self):
+        # the oldest stock rootfs confirmed to carry the vulnerable hash
+        self.assert_state("JIO_JIDU6701_R2.0.19.6", "YES", model="JIDU6701")
 
     def test_r3_2_0_is_confirmed(self):
         # a member-confirmed working build on the MTK family
-        self.assert_release("ARCNJIO_JIDU6101_R3.2.0", False)
+        self.assert_state("ARCNJIO_JIDU6101_R3.2.0", "YES")
 
     def test_r3_2_1_requires_api_test(self):
         # the fix had landed by R3.2.3 on MTK (stock 6701 rootfs): somewhere
         # between R3.2.0 and there, so anything in between stays a TEST
-        self.assert_release("ARCNJIO_JIDU6101_R3.2.1", True)
+        self.assert_state("ARCNJIO_JIDU6101_R3.2.1", "TEST")
+
+    def test_r3_2_2_requires_api_test(self):
+        self.assert_state("ARCNJIO_JIDU6101_R3.2.2", "TEST")
+
+    def test_r3_2_3_is_method_closed(self):
+        # read from a stock 6701 rootfs: luci.sys.user.setpasswd replaced the
+        # unescaped shell-out
+        self.assert_state("ARCNJIO_JIDU6101_R3.2.3", "NO")
 
     def test_later_patch_requires_api_test(self):
-        self.assert_release("ARCNJIO_JIDU6101_R3.2.0.1", True)
+        self.assert_state("ARCNJIO_JIDU6101_R3.2.0.1", "TEST")
 
     def test_unknown_version_requires_api_test(self):
-        self.assert_release("ARCNJIO_JIDU6101", True)
+        self.assert_state("ARCNJIO_JIDU6101", "TEST")
 
     def test_qualcomm_r3_2_6_is_confirmed(self):
         # a member report on a JIDU6611: the password bug still ran on R3.2.6
-        self.assert_release("SRCMJIO_JIDU6611_R3.2.6", False, model="JIDU6611")
+        self.assert_state("SRCMJIO_JIDU6611_R3.2.6", "YES", model="JIDU6611")
 
     def test_qualcomm_beyond_report_requires_api_test(self):
         # nothing beyond the R3.2.6 datapoint is known for the 6j11 builds
-        self.assert_release("SRCMJIO_JIDU6611_R3.2.7", True, model="JIDU6611")
+        self.assert_state("SRCMJIO_JIDU6611_R3.2.7", "TEST", model="JIDU6611")
+
+
+class UnlockGateTests(unittest.TestCase):
+    def test_method_closed_verdict_stops_before_touching_the_router(self):
+        verdict = idu.Verdict(
+            model="JIDU6101", firmware="R2.0.18.2", vectors=[],
+            evidence=["release < R2.0.19: no password-history shell-out"],
+            method_closed=True)
+        with self.assertRaises(idu.UnsupportedFirmware):
+            idu.unlock(object(), None, "pw", verdict=verdict)
+
+
+class CallbackAddressTests(unittest.TestCase):
+    def test_override_is_used(self):
+        self.assertEqual(
+            idu.callback_address("192.168.31.1", "192.168.31.51"),
+            "192.168.31.51")
+
+    def test_loopback_is_rejected(self):
+        with self.assertRaises(idu.IduError):
+            idu.callback_address("192.168.31.1", "127.0.0.1")
+
+    def test_wsl_nat_address_is_rejected(self):
+        with (mock.patch.object(idu, "_running_in_wsl", return_value=True),
+              mock.patch.object(idu.socket, "gethostbyname",
+                                return_value="192.168.31.1")):
+            with self.assertRaises(idu.IduError):
+                idu.callback_address("192.168.31.1", "172.20.0.2")
+
+    def test_wsl_with_a_lan_override_is_allowed(self):
+        with mock.patch.object(idu, "_running_in_wsl", return_value=True):
+            self.assertEqual(
+                idu.callback_address("192.168.31.1", "192.168.31.51"),
+                "192.168.31.51")
+
+
+class InjectorTests(unittest.TestCase):
+    def test_literal_password_fits_the_policy(self):
+        password = idu.Injector("Aa1").literal()
+        self.assertGreaterEqual(len(password), idu.PASSWORD_MIN)
+        self.assertLessEqual(len(password), idu.PASSWORD_MAX)
+        self.assertNotIn("|", password)
+        self.assertTrue(password.isalnum())
+
+
+class PasswordProbeTests(unittest.TestCase):
+    class Api:
+        def __init__(self, records_history, history=""):
+            self.records_history = records_history
+            self.history = history
+            self.calls = []
+
+        def guest_record(self):
+            return {"recordId": "3", "passwdHistory": self.history}
+
+        def set_password(self, record_id, password):
+            self.calls.append(password)
+            if self.records_history:
+                self.history = "new-hash"
+            return {"status": "OK", "code": "OK"}
+
+    def run_vector(self, api, force=False):
+        with (mock.patch.object(idu.time, "sleep"),
+              contextlib.redirect_stdout(io.StringIO())):
+            idu.PasswordVector(force=force).execute(api, "192.168.31.51")
+
+    def test_missing_history_stops_before_the_payload(self):
+        api = self.Api(records_history=False)
+        with self.assertRaises(idu.UnsupportedFirmware):
+            self.run_vector(api)
+        self.assertEqual(len(api.calls), 1)
+        self.assertNotIn("$(", api.calls[0])
+
+    def test_unchanged_history_is_not_treated_as_support(self):
+        # a downgraded unit can keep an old passwdHistory in its config
+        api = self.Api(records_history=False, history="old-hash")
+        with self.assertRaises(idu.UnsupportedFirmware):
+            self.run_vector(api)
+        self.assertEqual(len(api.calls), 1)
+
+    def test_new_history_sends_both_payloads(self):
+        api = self.Api(records_history=True)
+        self.run_vector(api)
+        self.assertEqual(len(api.calls), 3)
+        self.assertNotIn("$(", api.calls[0])
+        self.assertIn("$(", api.calls[1])
+        self.assertIn("$(", api.calls[2])
+
+    def test_force_sends_payloads_without_history(self):
+        api = self.Api(records_history=False)
+        self.run_vector(api, force=True)
+        self.assertEqual(len(api.calls), 3)
+        self.assertIn("$(", api.calls[1])
+
+
+@unittest.skipIf(os.name == "nt", "POSIX bind errors")
+class PortErrorTests(unittest.TestCase):
+    def test_permission_denied_explains_root_not_lsof(self):
+        problem = PermissionError(errno.EACCES, "Permission denied")
+        with mock.patch.object(idu, "_running_in_wsl", return_value=False):
+            message = str(idu._port_error(80, problem))
+        self.assertIn("needs root", message)
+        self.assertIn("sudo", message)
+        self.assertNotIn("lsof", message)
+
+    def test_address_in_use_names_the_holder_command(self):
+        problem = OSError(errno.EADDRINUSE, "Address already in use")
+        message = str(idu._port_error(80, problem))
+        self.assertIn("already in use", message)
+        self.assertIn("lsof", message)
+
+    def test_wsl_permission_error_mentions_nat(self):
+        problem = PermissionError(errno.EACCES, "Permission denied")
+        with mock.patch.object(idu, "_running_in_wsl", return_value=True):
+            message = str(idu._port_error(80, problem))
+        self.assertIn("WSL2", message)
+        self.assertIn("flash.ps1", message)
 
 
 if __name__ == "__main__":

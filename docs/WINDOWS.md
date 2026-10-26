@@ -2,8 +2,9 @@
 
 Use **`flash.ps1`** — `flash.sh` is a bash script and will not run natively.
 Every command in [the README](../README.md) works the same way; only the leading
-`.\` differs. If you prefer bash, `flash.sh` runs unchanged under **WSL** or
-**Git Bash**.
+`.\` differs. If you prefer bash, `flash.sh` runs in **Git Bash**, which uses the
+Windows Python and the Windows network. **WSL2 is not suitable for `unlock` or
+`backup`** by default; see [WSL and Git Bash](#wsl-and-git-bash).
 
 ## One-time setup
 
@@ -62,6 +63,8 @@ ssh-keygen -t rsa -b 2048 -f $HOME\.ssh\idu_rsa
 .\flash.ps1 backup --key $HOME\.ssh\idu_rsa
 ```
 
+Use RSA: the stock Dropbear on these units rejects Ed25519.
+
 `unlock` itself needs no key: it is pure web-API injection.
 
 ## Firewall and port 80
@@ -72,9 +75,11 @@ permission — click **Allow** for **Private** networks (your home network;
 *Public* is for cafés and similar).
 
 If an unlock ends with *the router did not call back*, allow `python.exe` through
-the firewall, or run PowerShell as administrator so the rule can be created. If
-another program already occupies port 80 (IIS and the *World Wide Web Publishing
-Service* are common), check with:
+the firewall, or run PowerShell as administrator so the rule can be created.
+
+If it says `cannot listen on port 80: permission denied`, run PowerShell as
+Administrator and retry. If it says `already in use`, another program owns the
+port — IIS and the *World Wide Web Publishing Service* are common holders:
 
 ```powershell
 netstat -ano | findstr :80
@@ -82,7 +87,43 @@ netstat -ano | findstr :80
 
 A reboot clears a stuck holder.
 
+The tool prints the address it expects the router to call:
+
+```text
+[*] Callback: http://192.168.31.51:80/ (the router fetches the installer here)
+```
+
+If that is not your LAN address (a VPN, Hyper-V or a second adapter can win the
+route), pass the correct one:
+
+```powershell
+.\flash.ps1 --address 192.168.31.51 unlock
+```
+
+## WSL and Git Bash
+
+**Git Bash** runs the Windows Python, so `flash.sh` works there normally.
+
+**WSL2** is different. Its default NAT puts the distribution on a private
+`172.x` network, while the router is on the Windows LAN. The router cannot dial
+into the VM, so `unlock` binds port 80 and then waits for a callback that can
+never arrive. Running as root inside WSL does not fix the route. Use
+`flash.ps1` natively for `unlock` and `backup`. `detect` and `check` are fine in
+WSL because they only make outbound requests.
+
+If you need WSL2, enable mirrored networking in `%UserProfile%\.wslconfig`:
+
+```ini
+[wsl2]
+networkingMode=mirrored
+```
+
+Then run `wsl --shutdown`, reopen the distribution, and allow Python through
+Windows Firewall. A port proxy plus `--address` with the Windows LAN address also
+works, but has more moving parts.
+
 ## Single-dash options
 
-PowerShell users can use single-dash forms (`-Router`, `-Password`, `-Key`
-instead of `--router`, `--password`, `--key`).
+PowerShell users can use single-dash forms (`-Router`, `-Password`, `-Key`,
+`-Address`, `-Force` instead of `--router`, `--password`, `--key`, `--address`,
+`--force`).

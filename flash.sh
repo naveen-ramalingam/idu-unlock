@@ -13,11 +13,19 @@
 #   --password P    router admin password (prompted if omitted)
 #   --key PATH      SSH key. Optional: with no key root is left passwordless and
 #                   nothing of ours is installed on the router
+#   --address IP    local address the router should call back on (VPN/WSL)
+#   --force         send the payloads even when check says NO (advanced)
 #   -v, --verbose   show the per-command detail behind each method
 #
 # The router must be SET UP, not factory-fresh: a reset IDU keeps its API locked
 # until the setup wizard is completed in the web UI. Reset it, finish the wizard
 # (which sets the admin password), then run this and supply that password.
+#
+# On Linux, unlock/backup listen for the router on port 80, which is privileged.
+# If binding fails, run those two with sudo, or allow unprivileged low ports for
+# this boot:  sudo sysctl net.ipv4.ip_unprivileged_port_start=80
+# On Windows, use .\flash.ps1 instead: WSL2's default NAT cannot receive the
+# router's callback.
 #
 # Only run against equipment you own or are explicitly authorised to test.
 # Provided as is, without warranty, without liability — see the README.
@@ -28,6 +36,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROUTER="${ROUTER:-https://192.168.31.1}"
 PASSWORD="${PASSWORD:-}"
 KEY="${KEY:-}"
+ADDRESS="${ADDRESS:-}"
+FORCE=0
 VERBOSE=0
 NOBANNER=0
 CMD=""
@@ -37,7 +47,7 @@ say()  { printf '\033[1;34m[*]\033[0m %s\n' "$*"; }
 bad()  { printf '\033[1;31m[-]\033[0m %s\n' "$*" >&2; }
 
 usage() {
-  sed -n '3,16p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '3,18p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 while [ $# -gt 0 ]; do
@@ -46,6 +56,8 @@ while [ $# -gt 0 ]; do
     --router)   ROUTER="$2";   shift 2 ;;
     --password) PASSWORD="$2"; shift 2 ;;
     --key)      KEY="$2";      shift 2 ;;
+    --address)  ADDRESS="$2";  shift 2 ;;
+    --force)    FORCE=1;       shift ;;
     -v|--verbose) VERBOSE=1;   shift ;;
     -h|--help)  usage; exit 0 ;;
     flash)      bad "this tool no longer writes firmware — use it for root access and backups."; exit 2 ;;
@@ -110,9 +122,16 @@ fi
 idu() {
   local _args=( --router "$ROUTER" --password "$PASSWORD" )
   [ -n "$KEY" ] && _args+=( --key "$KEY" )
+  [ -n "$ADDRESS" ] && _args+=( --address "$ADDRESS" )
   [ "$VERBOSE" -eq 1 ] && _args+=( --verbose )
   [ "$NOBANNER" -eq 1 ] && _args+=( --no-banner )
-  "$PY" -u "$HERE/idu.py" "${_args[@]}" "$@"
+  # --force belongs to the unlock subcommand, so it goes after the command name.
+  # backup's inner `idu unlock` still gets it.
+  if [ "$FORCE" -eq 1 ] && [ "${1:-}" = "unlock" ]; then
+    "$PY" -u "$HERE/idu.py" "${_args[@]}" "$@" --force
+  else
+    "$PY" -u "$HERE/idu.py" "${_args[@]}" "$@"
+  fi
 }
 
 describe() {

@@ -39,6 +39,12 @@ Not sure which model you have? Detection changes nothing:
 ./flash.sh detect
 ```
 
-Whichever page you land on, back up first. The backup is the only way back to
-stock, and it holds the factory data that the flash does not recreate, including
-`uboot_credentials.env` for the UART route.
+Whichever page you land on, back up before flashing. The backup is the only way
+back to stock, and it holds the factory data that the flash does not recreate,
+including `uboot_credentials.env` for the UART route.
+
+The backup needs root SSH, so it depends on `unlock` working. Run
+`./flash.sh check` first: if it reports `NO`, this tool has no software-only
+backup for that unit. The UART route on the model page is then the fallback, and
+you need it before flashing anything. See
+[Firmware matters](../../README.md#firmware-matters).
