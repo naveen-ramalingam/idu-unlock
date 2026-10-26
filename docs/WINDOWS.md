@@ -36,8 +36,11 @@ Windows Python and the Windows network. **WSL2 is not suitable for `unlock` or
 
 ```powershell
 .\flash.ps1 check      # read-only compatibility check
-.\flash.ps1 backup     # unlock + backup
+.\flash.ps1 backup --key $HOME\.ssh\idu_rsa   # unlock + backup
 ```
+
+Create the key first, as shown in [There is no `expect` on
+Windows](#there-is-no-expect-on-windows); `backup` needs it to verify the login.
 
 The leading `.\` is required — PowerShell does not run scripts from the current
 folder by name alone.
@@ -109,10 +112,11 @@ route), pass the correct one:
 
 **WSL2** is different. Its default NAT puts the distribution on a private
 `172.16.0.0/12` network (`172.16`–`172.31`), while the router is on the Windows
-LAN. The router cannot dial into the VM, so `unlock` binds port 80 and then waits
-for a callback that can never arrive. Running as root inside WSL does not fix the route. Use
-`flash.ps1` natively for `unlock` and `backup`. `detect` and `check` are fine in
-WSL because they only make outbound requests.
+LAN. The router cannot dial into the VM. When the router is outside that range,
+`unlock` rejects the address before it starts the callback server, instead of
+waiting for a callback that cannot arrive. Running as root inside WSL does not
+fix the route. Use `flash.ps1` natively for `unlock` and `backup`. `detect` and
+`check` are fine in WSL because they only make outbound requests.
 
 If you need WSL2, enable mirrored networking in `%UserProfile%\.wslconfig`:
 
