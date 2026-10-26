@@ -14,3 +14,7 @@ partitions.txt
 uboot_env.txt
 AGENTS.md
 .commandcode/
+.gradle/
+build/
+app/build/
+local.properties
